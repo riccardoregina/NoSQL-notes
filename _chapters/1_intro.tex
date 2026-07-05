@@ -1,0 +1,58 @@
+\chapter{The Rise of NoSQL}
+For a large part of software history, relational databases have been the only adopted DBMS paradigm. Over the years, several alternatives were proposed --- such as deductive databases, object-oriented databases, and XML databases --- but none achieved lasting commercial success. A persistent issue with relational databases is the \keyword{impedance mismatch}: the structural and philosophical difference between the relational model (based on tables, rows, and set-oriented operations) and the object-oriented programming model (based on classes, objects, and references)\cite{sadalage2012nosql}. This mismatch forces developers to write complex translation logic between the application's in-memory object graph and the database's flat relational representation.
+
+Object-oriented databases attempted to solve this problem natively, but they swiftly faded into oblivion due to various shortcomings, including the lack of a solid theoretical foundation comparable to the relational model and poor integration with existing tools. In their place, \textbf{Object-Relational Mappers (ORMs)} became widespread, automating much of the mapping code while still operating over a relational backend. To gain further decoupling from the specific DBMS and to serve data over the web more naturally, the industry increasingly adopted \keyword{Application Databases} --- databases that serve data directly through an HTTP API, often backed by a relational store but hidden behind a service layer.
+
+Another critical limitation of relational databases is that they were primarily designed for single-server deployments and \textbf{do not scale well on clusters} (distributed environments), particularly when consistency and availability are required simultaneously across many nodes\cite{kleppmann2017ddia}. \keyword{NoSQL} databases emerged to address these challenges: they are generally non-relational by design and are built from the ground up to run efficiently on large clusters.
+
+\section{Data Models and Storage Models}
+A \keyword{data model} is a set of constructs and rules used to represent and organize information within a database. It defines how data are structured and manipulated. A \keyword{storage model}, on the other hand, describes how a DBMS physically stores, organizes, and retrieves data internally on the storage medium. The data model influences the logical view provided to the user, while the storage model determines performance characteristics such as read/write speed and memory footprint.
+
+Among the data models adopted by NoSQL systems, two major families can be identified:
+\begin{itemize}
+    \item \textbf{Aggregate-oriented models}: Key-value, Document, and Column-family stores.
+    \item \textbf{Graph-based models}: Designed for highly interconnected data.
+\end{itemize}
+
+\section{Aggregates}
+The term \keyword{aggregate} originates from Domain-Driven Design (DDD)\cite{evans2003ddd}. A DDD aggregate is a cluster of domain objects that can be treated as a single unit. An example is an \emph{order} together with its \emph{line-items}: while they are separate objects, it is useful to treat the order and all its line items as a single aggregate\cite{fowler2013aggregate}.
+
+Every aggregate has one of its component objects designated as the \keyword{aggregate root}. Any reference from outside the aggregate boundary should only point to the aggregate root, never to the internal objects. This allows the root to act as a gatekeeper, ensuring the integrity and enforcing the invariants of the aggregate as a whole. Aggregates are the basic unit of transfer for data storage: you request to load or save entire aggregates. Transactions should \textbf{not cross aggregate boundaries}; all changes within an aggregate are committed atomically, but changes spanning multiple aggregates must be handled with eventual consistency or compensating actions at the application level.
+
+\begin{warning}{Not to be confused with collections}
+    DDD aggregates should not be confused with generic collection classes (lists, maps, sets). DDD aggregates are domain-specific concepts --- an order, a clinic visit, a playlist --- while collections are generic data structures. An aggregate will often contain multiple collections together with simple fields. The term \q{aggregate} also appears in other contexts (e.g., UML class diagrams), where it denotes a different concept (a whole-part relationship) and does \emph{not} carry the DDD-specific semantics described here.
+\end{warning}
+
+Aggregates are the key to scaling well on clusters because they form a natural unit for:
+\begin{itemize}
+    \item \keyword{Replication}: The aggregate can be copied across multiple nodes to increase availability and read performance.
+    \item \keyword{Sharding} (horizontal partitioning): Different aggregates can be distributed across different nodes based on a shard key, allowing the database to store data in a distributed manner.
+\end{itemize}
+
+A \keyword{transaction} is a sequence of operations performed as a single logical unit of work. In relational databases, transactions are expected to satisfy the \keyword{ACID} properties:
+\begin{itemize}
+    \item \textbf{Atomicity}: All operations in the transaction complete successfully, or none do.
+    \item \textbf{Consistency}: The transaction brings the database from one valid state to another.
+    \item \textbf{Isolation}: Concurrent transactions do not interfere with each other.
+    \item \textbf{Durability}: Once committed, the results persist even in the event of a failure.
+\end{itemize}
+Aggregate-oriented databases can typically guarantee ACID properties \textbf{within a single aggregate} but cannot do so across cross-aggregate operations, which must be handled at the application level or with eventual consistency.
+
+\section{Key-Value Databases}
+A \keyword{key-value database} is the simplest NoSQL data model. It stores data as a collection of pairs $\langle key, value \rangle$, where the \code{key} is a unique identifier and the \code{value} is an opaque blob of data. The database does not inspect or interpret the structure of the value; it treats it as an atomic aggregate. This makes key-value stores a \textbf{strongly aggregate-oriented} model: the aggregate boundary is the entire value.
+
+To access a value, the only available primitive is a lookup by key. There is no way to query based on the internal structure of the value without retrieving it entirely. A prominent example of a key-value database is \textbf{Redis}, which stores values as strings and offers a rich set of in-memory data structures and operations.
+
+\section{Document Databases}
+A \keyword{document database} is also strongly aggregate-oriented, but with a crucial difference from key-value stores: the internal structure of the stored document (typically JSON, BSON, or XML) is \textbf{visible to the DBMS}. The database can parse the hierarchical structure of the document, index its fields, and allow queries based on those fields.
+
+To access a document, the primary method is still by its unique key, but secondary queries on document attributes are fully supported. The aggregate here is the document itself, which often embeds related sub-objects and lists. A widely used example of a document database is \textbf{MongoDB}.
+
+\begin{note}{Key-value vs Document}
+    The boundary between key-value and document databases is subtle. A key-value store treats the value as a black box; a document store understands and allows queries on the internal content of the value. This makes document databases more flexible for complex read patterns.
+\end{note}
+
+\section{Column-Family Stores}
+A \keyword{column-family store} (or wide-column store) is an aggregate-oriented model organized as a \textbf{two-level map}. The first level maps a \code{row key} to an aggregate (a collection of columns); the second level maps, within that aggregate, \code{column keys} to \code{values}. Columns can be grouped into \textbf{column families} to organize related attributes together.
+
+This model is still strongly aggregate-oriented: all columns belonging to the same row key are stored together on disk, forming the aggregate. A well-known example is \textbf{Cassandra}, which supports both \keyword{skinny rows} (a fixed, small number of columns per row, much like a relational table) and \keyword{wide rows} (a potentially very large and dynamically varying number of columns, up to billions, behaving essentially as a sorted map).
