@@ -29,6 +29,7 @@ Aggregates are the key to scaling well on clusters because they form a natural u
     \item \keyword{Sharding} (horizontal partitioning): Different aggregates can be distributed across different nodes based on a shard key, allowing the database to store data in a distributed manner.
 \end{itemize}
 
+\subsection{Transactions}
 A \keyword{transaction} is a sequence of operations performed as a single logical unit of work. In relational databases, transactions are expected to satisfy the \keyword{ACID} properties:
 \begin{itemize}
     \item \textbf{Atomicity}: All operations in the transaction complete successfully, or none do.
@@ -37,6 +38,37 @@ A \keyword{transaction} is a sequence of operations performed as a single logica
     \item \textbf{Durability}: Once committed, the results persist even in the event of a failure.
 \end{itemize}
 Aggregate-oriented databases can typically guarantee ACID properties \textbf{within a single aggregate} but cannot do so across cross-aggregate operations, which must be handled at the application level or with eventual consistency.
+
+\subsection{Relationships}
+In aggregate-oriented databases, relationships between aggregates are typically handled through \keyword{value-based correspondence}: rather than using foreign keys and joins as in the relational model, one aggregate stores the identifier of another aggregate's root. 
+This approach reflects the DDD principle that references between aggregates should only go through their roots.
+
+Consequently, \textbf{joins are delegated to the application layer}. 
+To reconstruct a relationship, the application must retrieve the first aggregate, extract the referenced identifier, and then issue a separate query to fetch the related aggregate. 
+The database itself does not perform server-side joins across aggregate boundaries. 
+This design trades immediate referential convenience for the ability to distribute aggregates independently across a cluster: delegating joins to the application allows each aggregate to be scaled independently, without being tied to the physical location of related aggregates.
+
+That said, some NoSQL databases do make relationships visible to the DBMS. 
+For instance, graph databases are natively relationship-oriented and allow efficient traversal of connections. 
+Even some document databases (like MongoDB) offer \code{\$lookup} operators that simulate a left outer join between collections, though these are typically recommended for occasional use rather than as a replacement for proper aggregate design.
+
+With respect to updates, the fundamental unit of data retrieval and persistence is the \textbf{aggregate itself}. When an application reads an aggregate, it receives a self-contained, complete snapshot of that domain unit --- not just a flat row that must be reassembled. This means:
+\begin{itemize}
+    \item The aggregate is the \textbf{atomic unit of writes}: all changes to the aggregate (including nested objects and collections) are saved together.
+    \item The aggregate is the \textbf{natural unit of reads}: the application loads the entire aggregate in one operation, which aligns with how the data will be used in business logic.
+    \item Because related aggregates are separate, updating multiple aggregates in response to a single business operation requires the application to coordinate the writes, often relying on eventual consistency patterns rather than distributed transactions.
+\end{itemize}
+
+\subsection{Materialized Views}
+A \keyword{materialized view} is a pre-computed, persisted result of a query that is stored as a concrete data structure on disk. Unlike a standard (virtual) view in relational databases, which is merely a saved query that gets re-executed each time it is referenced, a materialized view holds the actual data resulting from that query. The DBMS keeps the materialized view up to date by recomputing it (or incrementally updating it) when the underlying base data changes.
+
+In the context of NoSQL databases, materialized views serve several critical purposes:
+\begin{itemize}
+    \item \textbf{Supporting different query patterns}: In aggregate-oriented databases, data are modeled around a primary access pattern determined by the aggregate root. When an application needs to access the same data through a different aggregate boundary (e.g., querying orders by customer rather than by order ID), a materialized view can be built with the new access pattern as its primary key, effectively creating a pre-joined, query-optimized representation of the data.
+    \item \textbf{Improving read performance}: By pre-computing expensive aggregations, joins, or transformations, materialized views eliminate the need to perform these operations at query time. This is especially valuable in distributed NoSQL systems where server-side joins are not available and application-level joins are prohibitively expensive.
+    \item \textbf{Enabling real-time analytics}: Many NoSQL systems use materialized views to serve analytical queries without burdening the operational (OLTP) workload. The view can be updated asynchronously and queried independently.
+\end{itemize}
+The trade-off is that materialized views introduce \textbf{eventual consistency}: the data in the view may lag behind updates to the primary aggregates until the view is refreshed. The application must be designed to tolerate this delay. Prominent NoSQL databases that support materialized views include \textbf{Cassandra} (with its Materialized Views feature) and \textbf{Couchbase}, which uses materialized views and global secondary indexes to support flexible queries over its document store.
 
 \section{Key-Value Databases}
 A \keyword{key-value database} is the simplest NoSQL data model. It stores data as a collection of pairs $\langle key, value \rangle$, where the \code{key} is a unique identifier and the \code{value} is an opaque blob of data. The database does not inspect or interpret the structure of the value; it treats it as an atomic aggregate. This makes key-value stores a \textbf{strongly aggregate-oriented} model: the aggregate boundary is the entire value.
@@ -56,3 +88,101 @@ To access a document, the primary method is still by its unique key, but seconda
 A \keyword{column-family store} (or wide-column store) is an aggregate-oriented model organized as a \textbf{two-level map}. The first level maps a \code{row key} to an aggregate (a collection of columns); the second level maps, within that aggregate, \code{column keys} to \code{values}. Columns can be grouped into \textbf{column families} to organize related attributes together.
 
 This model is still strongly aggregate-oriented: all columns belonging to the same row key are stored together on disk, forming the aggregate. A well-known example is \textbf{Cassandra}, which supports both \keyword{skinny rows} (a fixed, small number of columns per row, much like a relational table) and \keyword{wide rows} (a potentially very large and dynamically varying number of columns, up to billions, behaving essentially as a sorted map).
+
+\section{Graph Databases}
+A \keyword{graph database} is a DBMS designed to store, manage, and query highly interconnected data by representing entities as \textbf{nodes} and relationships between them as \textbf{edges}. Both nodes and edges can have associated properties, which are key-value pairs describing their attributes. This model is explicitly relationship-centric: connections are first-class citizens of the data model, not something reconstructed at query time through joins.
+
+Graph databases excel in scenarios where the connections between entities are as important as the entities themselves, and where the application must traverse these connections efficiently. Typical use cases include:
+\begin{itemize}
+    \item \textbf{Social networks}: modeling users (nodes) and their friendships, follows, or interactions (edges).
+    \item \textbf{Recommendation engines}: traversing relationships like "users who bought X also bought Y" or "friends who liked Z."
+    \item \textbf{Knowledge graphs}: representing entities and their semantic relationships (e.g., "Socrates -- is\_a --> Philosopher -- born\_in --> Athens").
+    \item \textbf{Fraud detection}: identifying suspicious patterns by traversing complex networks of transactions, accounts, and devices.
+    \item \textbf{Route planning and network topology}: mapping physical or logical connections like roads, cables, or dependencies.
+\end{itemize}
+A prominent example of a graph database is \textbf{Neo4j}, which implements the labeled property graph model. In Neo4j, nodes are grouped by labels (e.g., \code{Person}, \code{City}), edges have a type that defines the nature of the relationship (e.g., \code{LIVES\_IN}, \code{KNOWS}), and both can store arbitrary properties. Neo4j provides its own declarative query language, \textbf{Cypher}, designed specifically for graph traversals and pattern matching.
+
+\subsection{Queries}
+Queries in a graph database are fundamentally based on \textbf{graph traversal and pattern matching}. Rather than joining tables through foreign key relationships, a graph query specifies a pattern of nodes and edges to match against the stored graph. The DBMS then locates paths through the graph that satisfy the pattern and returns the matched elements.
+
+For example, a Cypher query to find friends of friends of a given user looks like:
+\begin{verbatim}
+MATCH (u:User {name: 'Alice'})-[:KNOWS]->(friend)-[:KNOWS]->(fof)
+RETURN fof.name
+\end{verbatim}
+This query describes a pattern to match (Alice knows someone who knows someone else), and the database engine walks the graph edges to find all matching paths.
+
+Graph databases are extremely efficient at graph traversals due to their storage and indexing strategies. A key technique is \textbf{index-free adjacency}: each node physically stores direct references (pointers) to its adjacent nodes and edges on disk. To traverse from one node to a neighboring node, the database follows an in-memory or on-disk pointer directly to the target node's storage location. This is an \(O(1)\) operation per hop, \textbf{independent of the total size of the dataset}. In contrast, a relational database would need to perform an index lookup (typically \(O(\log n)\) per join) for each relationship traversal, and the cost compounds with each additional level of depth, making deep traversals prohibitively expensive.
+
+\textbf{Node insertions and deletions} in graph databases are also generally efficient. Inserting a new node involves allocating storage for the node's properties and establishing direct pointer references to its edges. Deleting a node requires removing the node and updating the adjacency pointers of all nodes that had edges to it. Because relationships are stored as physical pointers rather than matched through external indexes, these operations remain local to the affected nodes and their immediate neighbors. The cost is proportional to the node's degree (number of incident edges), not to the total graph size.
+
+\subsection{The Difference with Aggregate-oriented Databases}
+Graph databases and aggregate-oriented databases embody fundamentally different philosophies regarding data modeling, consistency, and distribution:
+
+\begin{itemize}
+    \item \textbf{Data model focus}: Aggregate-oriented databases are designed around the concept of the aggregate as a self-contained, bounded unit of data that is read and written atomically. Relationships between aggregates are denormalized (stored as foreign key references) and navigated at the application level. Graph databases, conversely, treat relationships as first-class entities that are stored and navigated natively within the database. The graph model does not require pre-defining aggregate boundaries; any node can be reached from any other node by traversing edges, without crossing an artificial aggregate frontier.
+
+    \item \textbf{Deployment model}: Most aggregate-oriented databases (key-value, document, column-family) are \textbf{distributed by design}, built to run across large clusters of commodity hardware. They achieve horizontal scalability through sharding and replication, with aggregates serving as the natural unit of distribution. Graph databases, however, \textbf{typically run on a single server} (or a small replicated cluster for high availability, not horizontal scale). The reason is that graph traversals inherently cross multiple nodes and edges, and partitioning a highly connected graph across a cluster inevitably cuts many edges, requiring expensive network round-trips for each hop. Most graph databases are not horizontally scalable for write-heavy or deeply connected workloads; they rely on vertical scaling and, in some cases, replication for read scaling.
+
+    \item \textbf{Consistency and transactions}: Because graph databases usually run on a single machine, they can offer \textbf{full ACID transactions} spanning many nodes and edges. A complex traversal that reads and modifies dozens of nodes and their relationships can be wrapped in a single atomic, isolated transaction. Aggregate-oriented databases, being distributed across many machines, typically guarantee ACID properties \textbf{only within a single aggregate} (on a single node). Cross-aggregate operations require the application to implement eventual consistency, compensating transactions, or distributed consensus protocols (which are slow and rarely used by default). This means that a graph database can natively support a use case like "transfer money from account A to account B while updating all related transaction records" atomically, whereas an aggregate-oriented database would require the application to break this into multiple writes and handle partial failures explicitly.
+\end{itemize}
+
+\subsection{Schema-less}
+Like aggregate-oriented databases, most graph databases are \textbf{schema-less} by default. This means the database engine does not enforce a rigid, predefined structure on the data. Nodes and edges of the same type can have different properties, and new property types can be introduced at any time without altering a schema definition. In Neo4j, for instance, one \code{Person} node can have properties \code{\{name: "Alice", age: 30\}} while another \code{Person} node has \code{\{name: "Bob", city: "London"\}}; both are valid.
+
+\begin{warning}{Schemaless \(\neq\) Without Schema}
+    The term \q{schema-less} is potentially misleading. Every database that stores useful information has an \textbf{implicit schema} --- the set of conventions, property names, data types, and structural patterns that the application code and the users \emph{expect} the data to follow. Without any such expectations, querying becomes impossible (you cannot query \code{age > 25} if you do not know whether \code{age} exists or what type it holds). Schema-less simply means that the database does \emph{not validate or enforce} these expectations; the responsibility for maintaining a consistent logical structure is shifted entirely to the application layer.
+\end{warning}
+
+This shift brings both benefits and costs:
+\begin{itemize}
+    \item \textbf{Flexibility}: Developers can evolve the data model incrementally without costly schema migrations. New properties can be added to some nodes or edges while others remain with the old structure, and application code handles the heterogeneity gracefully. This is particularly useful in agile development and when integrating heterogeneous data sources.
+    \item \textbf{Cost of enforcing consistency in the application}: Without database-level schema enforcement, every piece of application code that writes data must be disciplined to maintain the expected structure. Bugs or inconsistencies can easily introduce "dirty data" (missing properties, wrong types, inconsistent naming) that break queries or produce incorrect results. The database will not reject malformed writes.
+    \item \textbf{Implicit schema expectations}: Despite the lack of formal enforcement, users and applications typically operate under a strong implicit schema. There is an expected set of node labels, edge types, property names, and data types that queries and business logic rely on. This implicit schema must be documented, tested, and enforced through application-level validation, code reviews, and data governance practices.
+\end{itemize}
+Some graph databases (including Neo4j, starting from version 4.0) now offer \textbf{optional schema constraints} such as property type assertions, mandatory property requirements, and uniqueness constraints. These allow developers to selectively enforce parts of the implicit schema at the database level, combining the safety of relational-style schemas with the flexibility of a schema-less model where it is beneficial.
+
+\section{Data Distribution}
+In distributed database systems, data must be partitioned and placed across multiple physical machines (nodes) to achieve horizontal scalability. The \textbf{aggregate} is the natural unit for data distribution because it forms a self-contained, atomically manageable chunk of data: placing an entire aggregate on a single node ensures that reads and writes to that aggregate can be performed locally, without coordination with other nodes.
+
+Two orthogonal aspects govern how aggregates are distributed:
+\begin{itemize}
+    \item \textbf{Sharding} (or horizontal partitioning): distributing \emph{different} aggregates across different nodes to spread storage and processing load.
+    \item \textbf{Replication}: copying the \emph{same} aggregate onto multiple nodes to increase availability, durability, and read throughput.
+\end{itemize}
+
+\subsection{Sharding}
+\keyword{Sharding} is the process of splitting a dataset into disjoint subsets (shards) and assigning each shard to a different node. Each node is responsible only for the aggregates within its shard. The goal is to distribute both data storage and query processing evenly across the cluster.
+
+Effective sharding follows several guiding principles:
+\begin{itemize}
+    \item \textbf{Place data close to where it is accessed}: If a particular geographic region or a specific application service primarily accesses a subset of the data, those aggregates should ideally reside on nodes physically or logically near the consumers, reducing network latency.
+    \item \textbf{Keep the load even between nodes}: The sharding strategy should aim for a uniform distribution of data volume and request load. Skewed distributions (hotspots) degrade the performance of the entire cluster, as overloaded nodes become bottlenecks. Consistent hashing, range-based partitioning with careful key selection, and hash-based sharding are common techniques to achieve this balance.
+    \item \textbf{Group together data that may be read in sequence}: If certain aggregates are frequently accessed together (e.g., an order and its customer's profile), placing them on the same shard can reduce cross-node communication and improve the performance of multi-aggregate reads. However, this collocation must be balanced against load distribution concerns.
+\end{itemize}
+The \textbf{shard key} is the attribute (or set of attributes) of the aggregate used to determine which shard it belongs to. Choosing an appropriate shard key is a critical design decision: a poorly chosen key leads to uneven load and hot spots; a well-chosen key distributes data evenly while supporting the most frequent query patterns.
+
+\subsection{Replication}
+\keyword{Replication} involves maintaining copies of the same aggregate on multiple nodes. If one node fails, another can serve requests for the replicated data, improving \textbf{fault tolerance}. Replication also increases \textbf{read throughput}, as read requests can be distributed across all replicas. The two main replication architectures are:
+
+\begin{itemize}
+    \item \textbf{Master-slave replication}: One node is designated as the \textbf{master} (or primary) for a given aggregate, and all write operations must go through it. The master propagates changes to one or more \textbf{slaves} (or secondaries), which maintain read-only copies. 
+    \begin{itemize}
+        \item \emph{Advantages}: Simple conflict resolution (the master is the single source of truth); consistent writes; easy to understand and implement.
+        \item \emph{Disadvantages}: The master is a single point of failure for writes (if the master dies, writes are blocked until failover completes); write scalability is limited to a single node; there may be replication lag, causing stale reads from slaves.
+    \end{itemize}
+    
+    \item \textbf{Peer-to-peer replication}: All replicas are equal; writes can be accepted by any node, and changes are propagated to all other replicas.
+    \begin{itemize}
+        \item \emph{Advantages}: No single point of failure; writes can be processed by any node, improving write availability and scalability; reads can also be served by any node.
+        \item \emph{Disadvantages}: \textbf{Conflict resolution} becomes a major challenge --- concurrent writes to the same aggregate on different nodes must be detected and reconciled, often using techniques like vector clocks, last-write-wins (which may lose data), or application-level merging; consistency guarantees are weaker; the system is more complex to design and operate.
+    \end{itemize}
+\end{itemize}
+
+\subsection{Sharding and Replication Combined}
+In practice, sharding and replication are deployed \textbf{together} to achieve both horizontal scalability and high availability. A typical distributed database cluster partitions data into shards, and each shard is replicated across a small number of nodes (typically 3--5). This means that for any given aggregate:
+\begin{itemize}
+    \item Exactly one shard is responsible for it (determined by the shard key).
+    \item That shard consists of multiple replicas, with one acting as master (or all as peers, depending on the replication architecture).
+\end{itemize}
+The database can thus tolerate the failure of individual nodes (because replicas exist), while simultaneously distributing the overall data volume and request load across many shards. When scaling out, new nodes are added, and some shards and their replicas are relocated to the new nodes to rebalance the load. Systems like \textbf{Cassandra} and \textbf{MongoDB} (when deployed in sharded clusters) exemplify this combined approach: Cassandra uses consistent hashing for sharding with peer-to-peer replication within each shard's replica set, while MongoDB shards collections based on a shard key and replicates each shard using master-slave (primary-secondary) replication.
