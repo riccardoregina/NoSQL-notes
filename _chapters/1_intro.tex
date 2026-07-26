@@ -92,55 +92,22 @@ This model is still strongly aggregate-oriented: all columns belonging to the sa
 \section{Graph Databases}
 A \keyword{graph database} is a DBMS designed to store, manage, and query highly interconnected data by representing entities as \textbf{nodes} and relationships between them as \textbf{edges}. Both nodes and edges can have associated properties, which are key-value pairs describing their attributes. This model is explicitly relationship-centric: connections are first-class citizens of the data model, not something reconstructed at query time through joins.
 
-Graph databases excel in scenarios where the connections between entities are as important as the entities themselves, and where the application must traverse these connections efficiently. Typical use cases include:
-\begin{itemize}
-    \item \textbf{Social networks}: modeling users (nodes) and their friendships, follows, or interactions (edges).
-    \item \textbf{Recommendation engines}: traversing relationships like "users who bought X also bought Y" or "friends who liked Z."
-    \item \textbf{Knowledge graphs}: representing entities and their semantic relationships (e.g., "Socrates -- is\_a --> Philosopher -- born\_in --> Athens").
-    \item \textbf{Fraud detection}: identifying suspicious patterns by traversing complex networks of transactions, accounts, and devices.
-    \item \textbf{Route planning and network topology}: mapping physical or logical connections like roads, cables, or dependencies.
-\end{itemize}
+Graph databases excel in scenarios where the connections between entities are as important as the entities themselves, and where the application must traverse these connections efficiently. Typical use cases include: social networks, recommendation engines (traversing relationships like \q{users who bought X also bought Y} or \q{friends who liked Z.}), knowledge graphs, fraud detection, route planning and network topology.
+
 A prominent example of a graph database is \textbf{Neo4j}, which implements the labeled property graph model. In Neo4j, nodes are grouped by labels (e.g., \code{Person}, \code{City}), edges have a type that defines the nature of the relationship (e.g., \code{LIVES\_IN}, \code{KNOWS}), and both can store arbitrary properties. Neo4j provides its own declarative query language, \textbf{Cypher}, designed specifically for graph traversals and pattern matching.
 
-\subsection{Queries}
-Queries in a graph database are fundamentally based on \textbf{graph traversal and pattern matching}. Rather than joining tables through foreign key relationships, a graph query specifies a pattern of nodes and edges to match against the stored graph. The DBMS then locates paths through the graph that satisfy the pattern and returns the matched elements.
-
-For example, a Cypher query to find friends of friends of a given user looks like:
-\begin{verbatim}
-MATCH (u:User {name: 'Alice'})-[:KNOWS]->(friend)-[:KNOWS]->(fof)
-RETURN fof.name
-\end{verbatim}
-This query describes a pattern to match (Alice knows someone who knows someone else), and the database engine walks the graph edges to find all matching paths.
-
-Graph databases are extremely efficient at graph traversals due to their storage and indexing strategies. A key technique is \textbf{index-free adjacency}: each node physically stores direct references (pointers) to its adjacent nodes and edges on disk. To traverse from one node to a neighboring node, the database follows an in-memory or on-disk pointer directly to the target node's storage location. This is an \(O(1)\) operation per hop, \textbf{independent of the total size of the dataset}. In contrast, a relational database would need to perform an index lookup (typically \(O(\log n)\) per join) for each relationship traversal, and the cost compounds with each additional level of depth, making deep traversals prohibitively expensive.
-
-\textbf{Node insertions and deletions} in graph databases are also generally efficient. Inserting a new node involves allocating storage for the node's properties and establishing direct pointer references to its edges. Deleting a node requires removing the node and updating the adjacency pointers of all nodes that had edges to it. Because relationships are stored as physical pointers rather than matched through external indexes, these operations remain local to the affected nodes and their immediate neighbors. The cost is proportional to the node's degree (number of incident edges), not to the total graph size.
-
-\subsection{The Difference with Aggregate-oriented Databases}
-Graph databases and aggregate-oriented databases embody fundamentally different philosophies regarding data modeling, consistency, and distribution:
-
-\begin{itemize}
-    \item \textbf{Data model focus}: Aggregate-oriented databases are designed around the concept of the aggregate as a self-contained, bounded unit of data that is read and written atomically. Relationships between aggregates are denormalized (stored as foreign key references) and navigated at the application level. Graph databases, conversely, treat relationships as first-class entities that are stored and navigated natively within the database. The graph model does not require pre-defining aggregate boundaries; any node can be reached from any other node by traversing edges, without crossing an artificial aggregate frontier.
-
-    \item \textbf{Deployment model}: Most aggregate-oriented databases (key-value, document, column-family) are \textbf{distributed by design}, built to run across large clusters of commodity hardware. They achieve horizontal scalability through sharding and replication, with aggregates serving as the natural unit of distribution. Graph databases, however, \textbf{typically run on a single server} (or a small replicated cluster for high availability, not horizontal scale). The reason is that graph traversals inherently cross multiple nodes and edges, and partitioning a highly connected graph across a cluster inevitably cuts many edges, requiring expensive network round-trips for each hop. Most graph databases are not horizontally scalable for write-heavy or deeply connected workloads; they rely on vertical scaling and, in some cases, replication for read scaling.
-
-    \item \textbf{Consistency and transactions}: Because graph databases usually run on a single machine, they can offer \textbf{full ACID transactions} spanning many nodes and edges. A complex traversal that reads and modifies dozens of nodes and their relationships can be wrapped in a single atomic, isolated transaction. Aggregate-oriented databases, being distributed across many machines, typically guarantee ACID properties \textbf{only within a single aggregate} (on a single node). Cross-aggregate operations require the application to implement eventual consistency, compensating transactions, or distributed consensus protocols (which are slow and rarely used by default). This means that a graph database can natively support a use case like "transfer money from account A to account B while updating all related transaction records" atomically, whereas an aggregate-oriented database would require the application to break this into multiple writes and handle partial failures explicitly.
-\end{itemize}
-
-\subsection{Schema-less}
-Like aggregate-oriented databases, most graph databases are \textbf{schema-less} by default. This means the database engine does not enforce a rigid, predefined structure on the data. Nodes and edges of the same type can have different properties, and new property types can be introduced at any time without altering a schema definition. In Neo4j, for instance, one \code{Person} node can have properties \code{\{name: "Alice", age: 30\}} while another \code{Person} node has \code{\{name: "Bob", city: "London"\}}; both are valid.
+\section{Schemaless}
+Like aggregate-oriented databases, most graph databases are \textbf{schema-less} by default. This means the database engine does not enforce a rigid, predefined structure on the data. 
 
 \begin{warning}{Schemaless \(\neq\) Without Schema}
     The term \q{schema-less} is potentially misleading. Every database that stores useful information has an \textbf{implicit schema} --- the set of conventions, property names, data types, and structural patterns that the application code and the users \emph{expect} the data to follow. Without any such expectations, querying becomes impossible (you cannot query \code{age > 25} if you do not know whether \code{age} exists or what type it holds). Schema-less simply means that the database does \emph{not validate or enforce} these expectations; the responsibility for maintaining a consistent logical structure is shifted entirely to the application layer.
 \end{warning}
-
 This shift brings both benefits and costs:
 \begin{itemize}
-    \item \textbf{Flexibility}: Developers can evolve the data model incrementally without costly schema migrations. New properties can be added to some nodes or edges while others remain with the old structure, and application code handles the heterogeneity gracefully. This is particularly useful in agile development and when integrating heterogeneous data sources.
-    \item \textbf{Cost of enforcing consistency in the application}: Without database-level schema enforcement, every piece of application code that writes data must be disciplined to maintain the expected structure. Bugs or inconsistencies can easily introduce "dirty data" (missing properties, wrong types, inconsistent naming) that break queries or produce incorrect results. The database will not reject malformed writes.
-    \item \textbf{Implicit schema expectations}: Despite the lack of formal enforcement, users and applications typically operate under a strong implicit schema. There is an expected set of node labels, edge types, property names, and data types that queries and business logic rely on. This implicit schema must be documented, tested, and enforced through application-level validation, code reviews, and data governance practices.
+    \item \textbf{Flexibility}: Developers can evolve the data model incrementally without costly schema migrations. This is particularly useful in agile development and when integrating heterogeneous data sources.
+    \item \textbf{Enforcing consistency}: Without database-level schema enforcement, every piece of application code that writes data must be disciplined to maintain the expected structure (implicit schema). Bugs or inconsistencies can easily introduce "dirty data" (missing properties, wrong types, inconsistent naming) that break queries or produce incorrect results. The database will not reject malformed writes.
+    The implicit schema must be documented, tested, and enforced through application-level validation, code reviews, and data governance practices.
 \end{itemize}
-Some graph databases (including Neo4j, starting from version 4.0) now offer \textbf{optional schema constraints} such as property type assertions, mandatory property requirements, and uniqueness constraints. These allow developers to selectively enforce parts of the implicit schema at the database level, combining the safety of relational-style schemas with the flexibility of a schema-less model where it is beneficial.
 
 \section{Data Distribution}
 In distributed database systems, data must be partitioned and placed across multiple physical machines (nodes) to achieve horizontal scalability. The \textbf{aggregate} is the natural unit for data distribution because it forms a self-contained, atomically manageable chunk of data: placing an entire aggregate on a single node ensures that reads and writes to that aggregate can be performed locally, without coordination with other nodes.
@@ -186,3 +153,118 @@ In practice, sharding and replication are deployed \textbf{together} to achieve 
     \item That shard consists of multiple replicas, with one acting as master (or all as peers, depending on the replication architecture).
 \end{itemize}
 The database can thus tolerate the failure of individual nodes (because replicas exist), while simultaneously distributing the overall data volume and request load across many shards. When scaling out, new nodes are added, and some shards and their replicas are relocated to the new nodes to rebalance the load. Systems like \textbf{Cassandra} and \textbf{MongoDB} (when deployed in sharded clusters) exemplify this combined approach: Cassandra uses consistent hashing for sharding with peer-to-peer replication within each shard's replica set, while MongoDB shards collections based on a shard key and replicates each shard using master-slave (primary-secondary) replication.
+
+\section{Atomicity in Distributed Systems}
+To guarantee atomicity across several nodes in a distributed system, a common protocol is the \keyword{Two-Phase Commit (2PC)} \cite{kleppmann2017ddia}. The protocol involves a coordinator node and multiple participant nodes, and proceeds in two phases:
+
+\begin{enumerate}
+    \item \textbf{Prepare phase}: The coordinator sends a \emph{prepare} request to all participant nodes, asking whether they are able to carry out the update. Each node must respond with a \emph{yes} (ready to commit) or \emph{no} (unable to commit). During this phase, each node acquires the necessary locks and writes the transaction's changes to a temporary storage, but does \emph{not} yet make them visible.
+    \item \textbf{Commit phase}: If \textbf{all} nodes respond \emph{yes}, the coordinator sends a \emph{commit} message, instructing the nodes to make the update permanent and release the locks. If \textbf{any} node responds \emph{no} (or fails to respond within a timeout) during the prepare phase, or if an error occurs during the commit phase, the coordinator sends an \emph{abort} message, and all nodes roll back their changes.
+\end{enumerate}
+
+To avoid consistency issues, the nodes are \textbf{not allowed to make the updating resources available} to other transactions until the protocol has completed. While a node is in the prepared state (after voting \emph{yes} but before receiving the commit/abort decision), it is \emph{blocked}: it cannot release locks or expose intermediate data, because it must be able to commit or abort based on the coordinator's final instruction. Each node must eventually learn whether the other nodes succeeded or failed, which is why the coordinator's decision is critical --- if the coordinator crashes at the wrong moment, participants can remain blocked indefinitely \cite{kleppmann2017ddia}.
+
+\section{Consistency in Distributed Systems}
+In a distributed database where data is replicated across multiple nodes, concurrent operations can lead to conflicts. There are three fundamental types of conflicts:
+
+\begin{itemize}
+    \item \textbf{Read-read conflict}: Two transactions, in two different nodes, read the same data item, but in different versions. 
+    \item \textbf{Write-write conflict}: Two transactions attempt to update the same data item concurrently. 
+    \begin{example}{Write-write conflict}
+        Node A receives an update setting \code{balance = 50}, while Node B simultaneously receives an update setting \code{balance = 70} for the same account. Without coordination, the final value depends on which write arrives last, and one update is silently lost.
+    \end{example}
+    \item \textbf{Read-write conflict}: One transaction reads a data item while another transaction is in the process of updating it.
+    \begin{example}{Read-write conflict}
+        Node A reads a customer's order history (current state: 5 orders). Meanwhile, Node B inserts a new order for the same customer. Node A's read sees a stale, incomplete picture of the order history.
+    \end{example}
+\end{itemize}
+
+To manage inconsistency, two broad strategies exist:
+\begin{itemize}
+    \item \textbf{Pessimistic approach}: Prevents conflicts from occurring by acquiring locks on resources before accessing them. While this guarantees consistency, it reduces availability and may cause \textbf{deadlocks} (where two transactions each wait for the other to release a lock).
+    \item \textbf{Optimistic approach}: Allows conflicts to occur, detects them after the fact, and then takes corrective action. For example, in a write-write conflict, the system might merge the two writes (using conflict-free replicated data types or application-specific logic) or let the last write win \cite{kleppmann2017ddia}.
+\end{itemize}
+
+There is a clear \textbf{trade-off between consistency and availability}: pessimistic locking favors consistency at the cost of availability, while optimistic strategies favor availability but allow temporary inconsistency.
+
+The \keyword{inconsistency window} is defined as the length of time during which an inconsistency is present in the system --- from the moment a write occurs on one node until all replicas have been updated and reflect the new value. The goal of eventual consistency models is to keep this window as small as possible.
+
+\subsection{The CAP Theorem}
+
+The \keyword{CAP theorem}, originally formulated by Eric Brewer, states that a distributed data store can simultaneously provide only two of the following three guarantees \cite{kleppmann2017ddia}:
+
+\begin{itemize}
+    \item \textbf{Consistency}: Every read receives the most recent write (or an error). All nodes see the same data at the same time.
+    \item \textbf{Availability}: Every request (read or write) receives a non-error response, without guaranteeing that it contains the most recent write.
+    \item \textbf{Partition tolerance}: The system continues to operate despite a network partition. A network partition occurs when nodes lose the ability to communicate with each other, effectively dividing the network into two or more isolated subgroups.
+\end{itemize}
+
+\begin{theorem}[label=thm:cap]{CAP}
+In a distributed data store, given the properties of \textbf{C}onsistency, \textbf{A}vailability and \textbf{P}artition tolerance, you can only get two.
+\end{theorem}
+Now, we give an intuitive proof of the theorem.
+
+\begin{proof}
+    Consider two nodes, A and B, separated by a network partition. A write arrives at node A, but A cannot communicate with B. There are two choices:
+    \begin{enumerate}
+        \item \textbf{Prioritize consistency}: A refuses the write, because it cannot replicate to B. The system is unavailable for writes.
+        \item \textbf{Prioritize availability}: A accepts the write. Node B will serve stale reads until the partition heals. The system is inconsistent.
+    \end{enumerate}
+    In either case, partition tolerance is forced by the network failure, so only one of consistency or availability can be preserved.
+\end{proof}
+
+To guarantee two of the three properties, the third must be sacrificed:
+\begin{itemize}
+    \item \textbf{Drop consistency (AP)}: The system remains available and partition-tolerant, but serves potentially stale data. Many NoSQL systems (e.g., Cassandra, DynamoDB) operate in this mode.
+    \item \textbf{Drop availability (CP)}: The system remains consistent and partition-tolerant, but may refuse requests during a partition to avoid serving stale data (e.g., HBase, MongoDB in certain configurations).
+    \item \textbf{Drop partition tolerance (CA)}: The system is consistent and available, but only as long as no network partition occurs. In practice, partitions are inevitable, so purely CA systems do not truly exist in distributed settings --- this essentially describes a single-node database.
+\end{itemize}
+
+With more than two nodes, we can relax these three properties and achieve all of them. This can be done by leveraging on quora.
+
+In fact, a node can be sure it has the most recent update by asking a \textbf{majority} of replicas --- a quorum. 
+In a system with \(N\) replicas and with a write committed on \(W\) nodes, the client needs to ask \(R\), s.t. \(W + R > N\), nodes to be sure that at least a read overlaps with an up-to-date node. 
+However, to avoid conflicting writes being accepted by different partitions, we add the constraint of \(W > N/2\), so that only one partition will be write available, i.e. the one with the quorum (2-Phase Commit). 
+Finally, a node must ask \(R > N/2\) nodes to be sure it has the most recent update.
+So, we are trading more requests for consistency.
+
+To achieve strong consistency, the update must be propagated to all nodes, i.e. \(W = N\), while for eventual consistency, \(W \geq N\) is enough. Of course, the \(W > N/2\) must be true for what we have said.
+
+\section{BASE}
+As opposed to the ACID properties of traditional relational databases, many NoSQL systems adopt the \keyword{BASE} model \cite{sadalage2012nosql}:
+\begin{itemize}
+    \item \textbf{B}asically \textbf{A}vailable: The system guarantees availability in terms of the CAP theorem (see \cref{thm:cap}), meaning that every request receives a response, even if some nodes are unavailable --- though the response may not reflect the most recent write.
+    \item \textbf{S}oft state: The state of the system may change over time, even without new input, due to the background propagation of updates across replicas (eventual consistency).
+    \item \textbf{E}ventually consistent: The system does not guarantee immediate consistency after a write, but if no new updates are made, eventually all replicas will converge to the same value.
+\end{itemize}
+BASE thus embraces the notion that consistency can be relaxed to achieve higher availability and partition tolerance.
+
+\begin{note}{Revisiting CAP Theorem}
+    The CAP theorem's enduring \q{2 of 3} formulation, while historically useful, obscures more than it clarifies~\cite{brewer2012caprevisited}. 
+    A primary source of confusion lies in the misalignment between CAP properties and the homonymous ACID guarantees. 
+    Within ACID, the 'C' denotes transactional invariants --- such as the preservation of unique keys --- whereas in CAP it refers exclusively to single-copy consistency, a far narrower constraint. 
+
+    Beyond this terminological discord, the classic binary interpretation of CAP fundamentally misrepresents its properties. 
+    Consistency, availability, and even partitions themselves are continuous spectra, not boolean toggles. Availability ranges from 0 to 100\%, consistency admits numerous gradations, and the perception of a partition can vary asymmetrically across nodes. 
+    Consequently, the consistency-availability choice is not a monolithic system decision but a granular one, potentially differing by subsystem, operation, or even individual data items or users.
+    
+    This nuanced view realigns the relationship between CAP and the BASE design philosophy. 
+    BASE was explicitly crafted to embody the high-availability end of the spectrum, in direct contrast to ACID's consistency-centric approach. 
+    Soft state and eventual consistency are particularly effective techniques for maintaining availability during partitions, and contemporary large-scale systems pragmatically blend elements from both ACID and BASE rather than committing to a single pole.
+    
+    Finally, partitions are rare events. 
+    This observation inverts the conventional CAP reasoning: rather than permanently forfeiting consistency or availability, systems should operate with full guarantees during normal operation. 
+    The theorem's trade-off should be invoked only when a partition is actually detected or suspected. 
+    The recommended strategy, therefore, is explicit partition management comprising three phases: detection of the partition, entry into a special partition mode that may selectively restrict operations, and a recovery phase upon restoration of communication to reconcile state and compensate for any violations that occurred during the partition.
+\end{note}
+
+\subsection{Eventual Consistency}
+Eventual consistency guarantees that, given enough time without further updates, all replicas of a data item will converge to the same value. However, during the inconsistency window, different replicas may return different values. Several stronger variants of eventual consistency exist, each providing additional guarantees to the application \cite{kleppmann2017ddia}:
+
+\begin{itemize}
+    \item \textbf{Causal consistency}: If operation A causally precedes operation B (i.e., B depends on or is aware of A), then all nodes see A before B. Operations that are not causally related (concurrent) may be seen in any order.
+    \item \textbf{Read-your-own-writes consistency}: A user is guaranteed to see any updates they have made, even if they are routed to a different replica for a subsequent read. Once a write is acknowledged, all future reads by the same client reflect that write.
+    \item \textbf{Session consistency}: A stronger version of read-your-own-writes that is scoped to a session. Within a session, all reads reflect the client's own writes. Across sessions, eventual consistency applies.
+    \item \textbf{Monotonic read consistency}: Once a client has seen a particular version of a data item, it will never see an older (stale) version in subsequent reads. Reads move forward in time.
+    \item \textbf{Monotonic write consistency}: A client's writes are applied in the order they were issued. The system serializes the writes from a single client, preventing out-of-order application.
+\end{itemize}
