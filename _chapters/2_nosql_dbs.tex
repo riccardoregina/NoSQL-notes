@@ -1,0 +1,632 @@
+\chapter{NoSQL Databases}
+
+This chapter provides a more in-depth description of the NoSQL database types introduced in the first chapter, focusing on their internal mechanisms, design patterns, and practical trade-offs.
+
+\section{Key-value Databases}
+
+A key-value database is the simplest form of NoSQL database, storing data as a collection of key-value pairs.
+
+\begin{definition}{Key}
+A \keyword{key} is a unique identifier used to look up a value in the database. Keys should have a logical structure, follow a consistent naming convention, and adopt a standard delimiter (e.g., \code{user:1001:profile}, \code{session:abc123}).
+\end{definition}
+
+\subsection{Storage and Distribution}
+
+Sets of key-value pairs are assigned to different nodes in a cluster. \keyword{Hashing} is a common method of assigning key-value pairs to nodes: a hash function is applied to the key, and the result determines which node stores the pair. This enables horizontal scaling and efficient distributed lookups.
+
+\begin{note}{Lookup Efficiency}
+    A naive key lookup is no more efficient than a linear search. However, more efficient solutions are possible through the use of \keyword{secondary indexes}, which allow querying by value rather than only by key.
+\end{note}
+
+\subsection{Design Patterns}
+
+Several design patterns are commonly used when modeling data with key-value databases:
+
+\begin{itemize}
+    \item \textbf{TTL Keys:} Keys can have a Time-To-Live, after which they are automatically expired and deleted. This is useful for session data, caches, and temporary tokens.
+    \item \textbf{Emulating Tables:} By using compound keys with a shared prefix (e.g., \code{user:1001:name}, \code{user:1001:email}), one can emulate the structure of a relational table.
+    \item \textbf{Aggregates:} Related data that is frequently accessed together can be stored as a single value (e.g., serialized JSON). This avoids multiple round-trips to the database.
+    \item \textbf{Atomic Aggregates:} When multiple values form an \keyword{atomic aggregate}, they must be updated together or not at all. Storing them under a single key guarantees atomicity, as operations on a single key are atomic in most key-value stores.
+    \item \textbf{Indexes:} To enable querying by non-key attributes, secondary indexes (maintained manually or provided by the database) can be built, mapping attribute values to sets of primary keys.
+\end{itemize}
+
+\section{Document Databases}
+
+Document databases store data as \keyword{documents}, which are self-contained, hierarchical data structures (typically JSON, BSON, or XML).
+
+\begin{definition}{Document and Collection}
+    A \keyword{document} is a single object where all attributes are stored together in a nested structure. A \keyword{collection} is a logical grouping of documents. Unlike relational tables, documents within the same collection are not required to have the same structure, although they should share some common characteristics.
+\end{definition}
+
+\subsection{Flexibility and Schema Design}
+
+This structural flexibility is a major advantage over relational databases, allowing rapid iteration and easy accommodation of heterogeneous data. However, some discipline is beneficial:
+
+\begin{itemize}
+    \item Documents in a collection should share a \textbf{common base structure}.
+    \item \textbf{Type attributes} are typically used to distinguish subtypes within a collection. For example, all \code{product} documents might share attributes like \code{name} and \code{price}, while a \code{type} field (\q{book}, \q{electronics}, \q{clothing}) indicates which additional, type-specific attributes are present.
+    \item One can measure \keyword{collection cohesion} (how closely related the documents within a collection are) and \keyword{coupling between collections} (how dependent different collections are on each other) to decide whether to split a collection or merge two collections.
+\end{itemize}
+
+\subsection{Modeling Relationships}
+
+Document databases reduce the need for joins through \keyword{denormalization}, storing related data together within a single document. However, one must avoid excessive denormalization that leads to data duplication and update anomalies.
+
+\begin{itemize}
+    \item \textbf{One-to-Many Relationships:} The \q{one} side is treated as the primary element, and the \q{many} side entities are \keyword{embedded} as an array within the primary document. For example, a \code{customer} document may embed an array of \code{addresses}. This allows retrieving the customer and all their addresses with a single read.
+    
+    \item \textbf{Many-to-Many Relationships:} Two collections are used, and each collection contains \keyword{references} to instances of the other entity. This minimizes data duplication, but referential integrity is not automatically guaranteed by the database --- it must be enforced at the application level. For example, \code{students} and \code{courses} collections each contain arrays of references to the other collection.
+\end{itemize}
+
+\subsection{Managing Hierarchies}
+
+To represent hierarchical structures (e.g., a hierarchy of product categories in an e-commerce platform), multiple modeling approaches are available. The choice depends on whether read or write operations dominate, and on the hierarchy's depth and mutability.
+
+\begin{example}{Product Category Hierarchy}
+    Consider an e-commerce product hierarchy where categories can have subcategories, forming a tree structure: \code{Electronics $\to$ Computers $\to$ Laptops}. The following approaches can model this:
+
+    \begin{enumerate}
+        \item \textbf{Parent References:} Each node stores a reference to its immediate parent. This makes moving a node easy (update one reference) but requires traversing the hierarchy step-by-step to retrieve all ancestors or descendants.
+        \item \textbf{Children References:} Each node stores an array of references to its immediate children. This facilitates retrieving a node's direct children but makes finding all ancestors difficult.
+        \item \textbf{Listing All Ancestors (Materialized Path):} Each node stores an array containing references to \emph{all} of its ancestors, from the root down to the immediate parent. This allows fast hierarchy navigation (retrieving all ancestors in a single read) and efficient subtree queries, at the cost of additional write overhead when the hierarchy is restructured.
+    \end{enumerate}
+\end{example}
+
+\section{Column Databases}
+
+Column databases, also known as wide-column stores, organize data into \keyword{column families} --- groups of data items that are frequently accessed together. Columns within the same family are stored physically close to each other on disk, enabling efficient retrieval of related attributes without reading entire rows.
+
+\subsection{An Example of Column Database: Bigtable}
+
+Google's \keyword{Bigtable} is an influential column database. In Bigtable, a data value is indexed by the triple
+\[
+(\text{row identifier}, \text{column name}, \text{timestamp})
+\]
+The \keyword{timestamp} orders multiple versions of the same column value. When a new value is written, it is \emph{added} rather than overwriting the previous one, preserving a history of changes. Read and write operations are \keyword{atomic} even when they involve several columns within the same row. Rows are maintained in \keyword{sorted order} by their row identifier, which enables efficient range queries. However, the sort order can be specified in one way only --- there is no secondary ordering mechanism.
+
+\subsection{Another Example: Cassandra}
+
+\keyword{Apache Cassandra} is a wide-column database where columns can be added dynamically at any time, providing substantial schema flexibility.
+
+\subsubsection{Architecture and Machine Hierarchy}
+
+Cassandra's architecture follows a clear machine hierarchy:
+\[
+\text{Cluster} \to \text{Datacenter} \to \text{Rack} \to \text{Node}
+\]
+Data is distributed across nodes according to this hierarchy, with awareness of physical topology to ensure fault tolerance.
+
+\subsubsection{Data Model}
+
+\begin{itemize}
+    \item \textbf{Column:} Composed of a \emph{name}, a \emph{value}, and a \emph{timestamp}. The timestamp is used to resolve conflicts between nodes when data is replicated.
+    \item \textbf{Row:} An ordered collection of columns. A row must fit entirely within a single node.
+\end{itemize}
+
+\begin{definition}{Primary Key in Cassandra}
+    In Cassandra, a \keyword{primary key} is not a single column but a list of columns. If the primary key consists of more than one column, it is called a \keyword{compound primary key}.
+    \begin{itemize}
+        \item The \keyword{partition key} is the first part of the primary key. It determines which node in the cluster stores the row.
+        \item The \keyword{clustering key(s)} are the remaining columns of the primary key (after the partition key). They sort the data within a partition.
+    \end{itemize}
+\end{definition}
+
+\begin{definition}{Table, Column Family, and Keyspace}
+    A \keyword{table} is a container for rows and corresponds to a \keyword{column family}. If multiple column families exist, the row key contains a pointer to each one of them --- this is why they can be conceptually viewed as tables. A table can be distributed across multiple nodes.
+
+    A \keyword{keyspace} is an instance of a Cassandra database and is a container of tables. A keyspace is defined by:
+    \begin{itemize}
+        \item \textbf{Replication factor:} How many copies of each piece of data should exist.
+        \item \textbf{Placement of replicas:} The strategy for distributing replicas across the cluster.
+        \item \textbf{Set of tables:} The tables belonging to the keyspace.
+    \end{itemize}
+\end{definition}
+
+\begin{warning}{Clock Synchronization}
+    Cassandra relies on timestamps to resolve write conflicts between replicas, assuming a synchronized global clock across all nodes. Achieving this is \emph{not trivial} in distributed systems.
+
+    Clock synchronization protocols such as \textbf{NTP} (Network Time Protocol) are typically employed. NTP allows nodes to synchronize their clocks with a hierarchy of reference time sources (stratum servers). However, even with NTP, clocks may drift between synchronization intervals, and network latency introduces uncertainty. For conflict resolution, Cassandra uses a \q{last-write-wins} policy based on these timestamps, which can lead to data loss if clock skew is significant. Alternative approaches, such as vector clocks or hybrid logical clocks, exist but introduce additional complexity.
+\end{warning}
+
+\subsubsection{Peer-to-Peer Communication and Anti-Entropy}
+
+Cassandra uses a peer-to-peer architecture, where each peer communicates with up to three other peers using the \keyword{Gossip protocol}. This protocol disseminates cluster metadata (node state, topology changes) efficiently without a central coordinator --- here is why it is called \emph{gossip}.
+
+To detect and repair data inconsistencies between replicas, Cassandra employs an \keyword{anti-entropy} mechanism:
+\begin{enumerate}
+    \item The sender and receiver nodes each calculate a \keyword{Merkle tree} over the data they store for a given range of tokens.
+    \item The trees are compared. 
+    \item If the trees do not match, the sender determines which node has the most recent version (using timestamps) and sends the up-to-date data to the receiver.
+\end{enumerate}
+
+\begin{note}{Merkle Trees}
+    A \keyword{Merkle tree} (or hash tree) is a tree data structure in which each leaf node is labeled with the cryptographic hash of a data block, and each non-leaf node is labeled with the hash of the concatenation of its children's labels. The root of the tree --- the \keyword{Merkle root} --- serves as a compact, fixed-size digest of the entire dataset.
+
+    \begin{center}
+    \begin{tikzpicture}[
+        level 1/.style={sibling distance=60mm},
+        level 2/.style={sibling distance=30mm},
+        every node/.style={draw, rectangle, minimum size=8mm, font=\footnotesize, rounded corners=2pt, fill=notecolor!10}
+    ]
+    \node {$H_{0,0} = H(H_{1,0} \parallel H_{1,1})$}
+        child { node {$H_{1,0} = H(H_{2,0} \parallel H_{2,1})$}
+            child { node {$H_{2,0} = H(D_0)$} }
+            child { node {$H_{2,1} = H(D_1)$} }
+        }
+        child { node {$H_{1,1} = H(H_{2,2} \parallel H_{2,3})$}
+            child { node {$H_{2,2} = H(D_2)$} }
+            child { node {$H_{2,3} = H(D_3)$} }
+        };
+    \end{tikzpicture}
+    \end{center}
+    In Cassandra, the data on each node is partitioned into ranges. For each range, both the sender and receiver nodes build a Merkle tree whose leaves are hashes of individual rows. They compare the trees starting from the root:
+    \begin{enumerate}
+        \item If the roots match, the data for that range is consistent --- no further comparison is needed.
+        \item If the roots differ, they compare the children. This proceeds recursively until the specific buckets (or rows) with discrepancies are identified.
+    \end{enumerate}
+    This allows detecting differences without transmitting or comparing entire datasets, drastically reducing network I/O during anti-entropy repair.
+
+    Merkle trees are widely used in cryptographic systems to efficiently and securely verify the integrity and membership of data blocks. In Bitcoin and other cryptocurrencies, transactions within a block are organized into a Merkle tree. The Merkle root is stored in the block header, allowing lightweight clients to verify whether a transaction is included in a block without downloading the entire block --- this is called a Merkle proof.
+\end{note}
+
+While Cassandra has no central coordinator for cluster management, it does use a coordinator node for individual client requests (reads/writes). This is a temporary role, not a permanent or central one.
+For each client request, one node acts as the coordinator --- usually the node the client connects to.
+The coordinator:
+\begin{enumerate}
+    \item Routes the request to the appropriate replica nodes (based on the partition key).
+    \item Collects responses from replicas and return the result to the client (error or success).
+    \item Handles consistency (e.g., ensuring \code{QUORUM} responses are received).
+\end{enumerate}
+
+\keyword{Hinted handoff} is a complementary repair mechanism in Cassandra. When a node that should receive a write is temporarily unavailable, the coordinator stores a \q{hint} containing the write on behalf of the unavailable node. When the failed node comes back online, the hint is replayed, and the node catches up on missed writes. Hints are kept for a configurable time window; if the node remains down beyond that window, anti-entropy repair must be used instead.
+
+\subsection{Guidelines for Column Databases}
+
+Column databases should only be chosen when a large number of servers is required and the operational burden of managing a distributed column store is justified. Otherwise, one should opt for document databases or key-value stores, which offer similar data model flexibility without the same architectural complexity.
+
+The following design guidelines should be observed when working with column databases:
+
+\begin{itemize}
+    \item \textbf{Design starts from queries.} Use cases guide the design of the data model. An analysis of queries yields information about: \emph{Entities} which become rows, \emph{Attributes of entities} which become columns, \emph{Query criteria} which drive the choice of column families and clustering keys, \emph{Derived values} which may be precomputed and stored.
+    
+    \item \textbf{Denormalize aggressively.} Since joins are not feasible in column databases, duplicate data across tables to support different query patterns.
+    
+    \item \textbf{Use valueless columns as flags.} A column with an empty value can act as a boolean flag, avoiding the need for explicit boolean values. One can freely mix valueless columns and columns with values within the same row.
+    
+    \item \textbf{Store an entire object in one row.} Related data should be colocated within the same row to enable atomic operations and single-pass retrieval.
+    
+    \item \textbf{Distribute load across nodes} by choosing an appropriate partition key that spreads data evenly across the cluster and avoids hot spots.
+    
+    \item \textbf{Set an appropriate limit on value versions.} Limiting the number of timestamped versions per column prevents unbounded storage growth.
+    
+    \item \textbf{Avoid complex column values.} BLOBs, JSON, and other complex structures should be split into individual columns instead, unless the application \emph{always} needs to retrieve the entire complex value as a single unit.
+\end{itemize}
+
+\section{Graph Databases}
+
+Graph databases are designed to store and query entities and their relationships directly as nodes and edges. Several types of graph databases exist, each suited to specific use cases:
+
+\begin{itemize}
+    \item \textbf{Online vs. Offline graph databases:} Online graph databases support real-time, transactional querying and updates (OLTP), while offline graph databases are optimized for batch processing and analytical workloads (OLAP) over large, static graphs.
+    \item \textbf{Native vs. Non-native graph databases:} A \keyword{native graph database} stores and manages data using a graph model at the storage layer (index-free adjacency). A \keyword{non-native graph database} uses an underlying non-graph storage engine (e.g., relational tables) and layers a graph API on top. A DBMS that exposes graph CRUD methods can be considered a graph DBMS regardless of its internal storage engine.
+\end{itemize}
+
+\subsection{Storage Model}
+
+The storage model of a graph database can take several forms:
+
+\begin{itemize}
+    \item \textbf{Native graph storage:} The database engine is designed from the ground up to store nodes, relationships, and properties as first-class objects, with direct physical pointers between related entities.
+    \item \textbf{Relational tables:} The graph structure is mapped to relational tables (e.g., tables for nodes and tables for edges with foreign keys). A graph query engine translates graph queries into SQL joins.
+    \item \textbf{RDF triples:} Data is stored as subject-predicate-object triples in a triple store. This is common for semantic web and linked data applications.
+\end{itemize}
+
+\subsection{Data Model}
+
+The predominant data model in modern graph databases is the \keyword{Labeled Property Graph} (LPG). It consists of the following core elements:
+
+\begin{definition}{Labeled Property Graph}
+A \keyword{Labeled Property Graph} is made up of:
+\begin{itemize}
+    \item \textbf{Nodes (vertices):} Represent entities. Each node can have one or more \emph{labels} that categorize it (e.g., \code{Person}, \code{Employee}).
+    \item \textbf{Relationships (edges):} Represent connections between nodes. A relationship consists of:
+    \begin{itemize}
+        \item A \emph{start node} and an \emph{end node}.
+        \item A \emph{name (type)} that describes the nature of the connection (e.g., \code{KNOWS}, \code{WORKS\_FOR}).
+        \item A \emph{direction}, indicating the orientation of the relationship.
+    \end{itemize}
+    Relationship instances can also have properties (key-value pairs).
+    \item \textbf{Properties:} Key-value pairs attached to both nodes and relationships, storing attributes (e.g., \code{name: "Alice"}, \code{since: 2020}).
+    \item \textbf{Labels:} Tags assigned to nodes to group them into sets (e.g., \code{:Person}, \code{:Product}).
+\end{itemize}
+\end{definition}
+
+Several structural characteristics distinguish the labeled property graph model:
+
+\begin{itemize}
+    \item \textbf{Multi-graph:} Multiple relationships of the same type, direction, and properties can exist between the same pair of nodes. Each relationship instance is a distinct entity, allowing several versions of the exact same edge to coexist.
+    \item \textbf{Self-loops:} A relationship can connect a node to itself.
+    \item \textbf{Identity:} Identity is determined by implementation-specific identifiers, not by properties. Two relationships can have identical data (type, properties, endpoints) and still be distinct entities distinguished only by their internal ID. Property values \emph{cannot} be references to vertices or edges; such connections can only be represented through explicit relationships.
+\end{itemize}
+
+\subsection{Queries}
+
+Queries in a graph database are fundamentally based on \textbf{graph traversal and pattern matching}. Rather than joining tables through foreign key relationships, a graph query specifies a pattern of nodes and edges to match against the stored graph. The DBMS then locates paths through the graph that satisfy the pattern and returns the matched elements.
+
+Graph databases are extremely efficient at graph traversals due to their storage and indexing strategies. 
+A key technique is \textbf{index-free adjacency}: each node physically stores direct references (pointers) to its adjacent nodes and edges on disk. 
+To traverse from one node to a neighboring node, the database follows an in-memory or on-disk pointer directly to the target node's storage location. 
+This is an \(O(1)\) operation per hop, \textbf{independent of the total size of the dataset}. 
+In contrast, a relational database would need to perform an index lookup (typically \(O(\log n)\) per join) for each relationship traversal, and the cost compounds with each additional level of depth, making deep traversals prohibitively expensive.
+
+Node insertions and deletions in graph databases are also generally efficient. 
+Inserting a new node involves allocating storage for the node's properties and establishing direct pointer references to its edges. 
+Deleting a node requires removing the node and updating the adjacency pointers of all nodes that had edges to it. 
+Because relationships are stored as physical pointers rather than matched through external indexes, these operations remain local to the affected nodes and their immediate neighbors. 
+The cost is proportional to the node's degree (number of incident edges), not to the total graph size.
+
+\subsection{Query Languages: Cypher}
+
+\keyword{Cypher} is a family of declarative query languages for property graphs. While the full language is proprietary to Neo4j, the openCypher project provides an open subset that is also implemented by other vendors.
+Other query languages are G-CORE and GQL (Graph Query Language), an ISO-standardized language for property graphs, heavily influenced by Cypher and other existing languages. GQL is the first standardized graph query language.
+
+\subsection{Syntax and Semantics of a Query}
+
+A Cypher query consists of a chain of clauses, evaluated in order:
+
+\begin{enumerate}
+    \item A \code{MATCH} clause followed by a graph pattern. Variants include:
+    \begin{itemize}
+        \item \code{OPTIONAL MATCH}: matches the pattern if it exists, but does not filter out rows if it does not (like an outer join). Unmatched elements are set to \code{null}.
+        \item \code{MANDATORY MATCH}: forces the pattern to match; if it fails, the entire query returns no results (this is the default behavior, but can be made explicit).
+    \end{itemize}
+    \item (Optionally) a \code{WHERE} clause following a \code{MATCH} or \code{WITH}, providing filter conditions that restrict the matched patterns.
+    \item (Optionally) a \code{WITH} clause followed by (possibly aliased) expressions and aggregate functions. It acts as a pipeline operator, passing only specified results to subsequent clauses and ending the current subquery. This is used for intermediate aggregation, projection, and pagination.
+    \item A \code{RETURN} clause followed by (possibly aliased) expressions and aggregate functions. It occurs exactly once, at the end of the outermost query, and specifies what data to output.
+    \item (Optionally) modifier sub-clauses: \code{ORDER BY} (sort results), \code{LIMIT} (restrict number of results), and \code{SKIP} (skip a number of results). These can follow a \code{WITH} or a \code{RETURN} clause.
+    \item (Optionally) a \code{UNION} (or \code{UNION ALL}) clause to combine the results of two complete queries, each with its own \code{RETURN}. \code{UNION} removes duplicates; \code{UNION ALL} retains them.
+\end{enumerate}
+
+Queries are syntactically not nested, but \textbf{chained}: each clause consumes the output of the preceding one. The order of clauses directly affects query semantics. Implementations may evaluate clauses in a modified order as long as the semantics are preserved. For example, a query engine might reorder filter operations to reduce intermediate result sizes, provided the final result remains identical.
+
+\begin{definition}{Node pattern}
+    A \keyword{node pattern} is denoted by a pair of parentheses \code{()}. Optionally, the following components can be specified:
+    \begin{itemize}
+        \item A \textbf{variable name}, written directly inside the parentheses: \code{(foo)}.
+        \item A \textbf{list of labels}, each prefixed with a colon \code{:} (e.g., \code{(:Person:Employee)}).
+        \item A \textbf{set of properties}, written as a comma-separated list of key-value pairs inside curly braces \code{\{\}} (e.g., \code{\{name: 'Alice', age: 30\}}).
+    \end{itemize}
+\end{definition}
+
+\begin{warning}{Quoting Rules in Cypher}
+Variable names, labels, and property keys are quoted with backticks (\code{`}), which can be omitted if only alphanumeric characters and underscores are used. Property values, if strings, use straight single quotes (\code{'}) or double quotes (\code{"}).
+\end{warning}
+
+\begin{example}{Detailed Node Pattern}
+    The following node pattern matches a node labeled \code{Person} and \code{Student}, with specific property constraints, bound to the variable \code{s}:
+    \begin{center}
+        \code{(s:\code{PERSON}:\code{STUDENT} \{name: 'Mario Rossi', age: 25, enrolled: true\})}
+    \end{center}
+\end{example}
+
+\begin{definition}{Path pattern and relationship pattern}
+    A \keyword{path pattern} is a sequence of one or more node patterns separated by relationship expressions. A path can have three directions:
+    \begin{itemize}
+        \item \textbf{Forward:} \code{()-[...]->()}
+        \item \textbf{Backward:} \code{()<-[...]-()}
+        \item \textbf{Bidirectional} (undirected): \code{()-[...]-()}
+    \end{itemize}
+
+    \noindent
+    The expression inside \code{[...]} is a \keyword{relationship pattern} with the following optional components:
+    \begin{itemize}
+        \item A \textbf{variable name}.
+        \item A \textbf{list of relationship types}: a \code{|}-separated list of type names that begins with a colon \code{:} (e.g., \code{[:KNOWS|WORKS\_WITH]}).
+        \item A \textbf{range literal} preceded by \code{*}: optionally followed by a specific range \code{n..m} (e.g., \code{*1..5}) or unbounded (e.g., \code{*}). The range specifies how many times the relationship may occur consecutively along the path. A specific range \code{*n..m} means the relationship type must occur between \code{n} and \code{m} times.
+        \item A \textbf{set of properties}: a comma-separated list of \code{key:value} pairs inside curly braces \code{\{\}}.
+    \end{itemize}
+\end{definition}
+
+\begin{warning}{}
+The range literal always applies to the whole relationship pattern. The \code{|}-separated list of relationship types is a \textbf{disjunction}: at least one of the listed types must match (in Neo4j, a relationship can only have one type). Similarly, the comma-separated list of properties inside curly braces is a \textbf{disjunction}: the matched relationship must have \emph{at least} the specified properties.
+\end{warning}
+
+\begin{example}{Path Pattern with Range}
+The path pattern \code{(a)-[:KNOWS*1..10]->(b)} matches all paths that link two nodes with at least one and at most ten consecutive \code{KNOWS} relationships (friendship chains up to depth 10).
+\end{example}
+
+
+\begin{definition}{Graph pattern}
+    A \keyword{graph pattern} is a comma-separated list of path patterns, interpreted in \textbf{conjunction}: all specified path patterns must be satisfied simultaneously for a match to occur.
+\end{definition}
+
+In a graph pattern match:
+\begin{itemize}
+    \item Every node pattern is mapped to a node.
+    \item Every path pattern is mapped to an alternating sequence of nodes and relationships (\texttt{NODE--RELATIONSHIP--NODE--\dots}), called a path.
+    \item Matches of the same path pattern can include patterns of different lengths, and each distinct match of the pattern is called a \keyword{distinct match}.
+    \item Parts of the pattern that have no associated variable must also be matched (they contribute to the matching conditions but are not bound to variables for later use).
+\end{itemize}
+
+\begin{warning}{Edge Uniqueness and Path Multiplicity}
+    In any single match of a graph pattern:
+    \begin{itemize}
+        \item Each \textbf{relationship} must be used in only one place within the pattern (\keyword{unique edges} feature). This means an edge cannot appear twice in the same pattern match.
+        \item Each \textbf{node} can be used multiple times within the same pattern.
+        \item When paths are matched, each distinct path (without repeated relationships) counts as one result (\keyword{path multiplicity} feature).\footnote{This means that even if there are multiple ways to walk the same set of edges (by reordering intermediate nodes that are visited via different routes), a path is defined by its sequence of relationships. Two paths that use the \emph{same} relationships in the \emph{same} order are considered identical, yielding a single match. Two paths that use different relationships (or the same relationships in a different order) are distinct matches, each yielding a separate result.}
+        \item To use the same edge multiple times, one must use several separate \code{MATCH} clauses.
+    \end{itemize}
+\end{warning}
+
+Graph pattern matching in Cypher is based on \textbf{relationship isomorphism}: relationships are matched injectively (no edge is reused within a single pattern), while nodes may be reused. This differs from pure homomorphism-based matching used in some other query languages (e.g., SPARQL), where both nodes and edges can be reused arbitrarily. The edge-isomorphism semantics prevent trivial, semantically redundant matches that would arise from re-walking the same edge.
+
+% Make an example of a prevented, trivial match.
+
+\subsubsection{Path Quantifiers}
+
+In addition to the range literal syntax for varying-length paths (e.g., \code{[:KNOWS*1..5]}), Cypher supports \keyword{path quantifiers}, also known as \keyword{quantified path patterns} or \keyword{quantified relationships}. These allow expressing complex, repeating sub-patterns along a path, going beyond simple repetition of a single relationship type.
+
+\begin{definition}{Path Quantifier}
+    A \keyword{path quantifier} applies a repetition operator to a parenthesized path pattern, specifying that the enclosed pattern may occur a certain number of times consecutively along a matched path. The syntax is:
+    \[
+    \texttt{((subpattern))\{min,max\}}
+    \]
+    where the quantifier \code{\{min,max\}} specifies the minimum and maximum number of repetitions of the subpattern. Variants include:
+    \begin{itemize}
+        \item \code{\{n\}}, exactly $n$ repetitions.
+        \item \code{\{n,\}}, at least $n$ repetitions.
+        \item \code{\{,m\}}, at most $m$ repetitions.
+        \item \code{\{n,m\}}, between $n$ and $m$ repetitions.
+        \item \code{\{*\}} or \code{*}, zero or more repetitions.
+        \item \code{\{+\}} or \code{+}, one or more repetitions.
+    \end{itemize}
+\end{definition}
+
+\begin{note}{Relation to Range Literals}
+    Path quantifiers are a generalization of the range literal in a relationship pattern. A simple range literal like \code{[:KNOWS*1..5]} is equivalent to the quantified path pattern \code{((:KNOWS))\{1,5\}}. However, path quantifiers can enclose arbitrarily complex subpatterns involving multiple nodes and relationships, making them strictly more expressive than plain range literals.
+\end{note}
+
+Variables declared within a quantified path pattern are \keyword{group variables}. Rather than binding to a single node or relationship, they bind to lists of all the nodes or relationships they matched across the repetitions of the subpattern.
+
+\begin{example}{Alternative Route Detection with Path Quantifiers}
+    Consider a transportation network where we want to find all possible routes between two cities that involve at least one and at most three intermediate stops, and collect the cities visited along the way:
+
+    \begin{lstlisting}[language=SQL, caption={Collecting intermediate stops with group variables}]
+MATCH (origin:City {name: 'Rome'})
+MATCH (dest:City {name: 'Berlin'})
+MATCH path = (origin)
+             -[(:ROAD|:RAIL|:FLIGHT)->(stop:City)]{1,3}
+             ->(dest)
+RETURN origin.name,
+       [s IN stop | s.name] AS intermediateStops,
+       length(path) AS totalHops
+    \end{lstlisting}
+    
+    Here \code{stop} is a group variable collecting all intermediate \code{City} nodes visited along the quantified path segment. The pattern uses a disjunction of relationship types (\code{:ROAD|RAIL|FLIGHT}) inside the quantified subpattern, allowing mixed-mode transportation chains.
+\end{example}
+
+\subsubsection{Accessing Matched Nodes and Relationships}
+
+Once nodes and relationships have been matched, their information can be accessed using the following functions and syntax:
+
+\begin{itemize}
+    \item Property access: \code{matched.propertyKey} or \code{matched[expression]}, where \code{expression} evaluates to a property key string.
+    \item \code{id(matched)}: Returns the numeric internal identifier of a node or relationship. Identity is determined by this ID, not by properties.
+    \item \code{keys(matched)}: Returns the list of all property keys of a node or relationship.
+    \item \code{labels(node)}: Returns the list of labels assigned to a node.
+    \item \code{type(relationship)}: Returns the type (name) of a relationship as a string.
+\end{itemize}
+
+\subsubsection{Accessing Matched Path}
+
+A matched path (alternating sequence of nodes and relationships) can be assigned to a variable by placing \code{variable =} in front of a path pattern:
+\begin{center}
+    \code{p = (a)-[:KNOWS*1..5]->(b)}
+\end{center}
+Functions to extract information from a path variable include:
+
+\begin{itemize}
+    \item \code{relationships(path)}: Returns the list of relationships in the path.
+    \item \code{nodes(path)}: Returns the list of nodes in the path.
+    \item \code{length(path)}: Returns the number of relationships in the path.
+\end{itemize}
+
+\subsubsection{Filter Conditions}
+
+Filter conditions are specified in \code{WHERE} clauses and determine which matched patterns are retained. A \code{WHERE} clause can contain:
+
+\begin{itemize}
+    \item Boolean expressions over properties and variables: \code{WHERE a.age > 18 AND a.name = 'Alice'}.
+    \item Logical operators: \code{AND}, \code{OR}, \code{XOR}, \code{NOT}.
+    \item Comparison operators: \code{=}, \code{<>}, \code{<}, \code{>}, \code{<=}, \code{>=}, \code{IS NULL}, \code{IS NOT NULL}.
+    \item String matching: \code{STARTS WITH}, \code{ENDS WITH}, \code{CONTAINS}, and regular expressions via \code{=~}.
+    \item List predicates: conditions over lists and their elements, but we will see this in the next section.
+    \item Path patterns: A \code{WHERE} clause can itself contain path patterns used as existential predicates. For example, \code{WHERE (a)-[:FRIEND]->(:Person)} filters for nodes that have at least one \code{FRIEND} relationship to a \code{Person}.
+    \item Existence checks: the function \code{exists(expression)} tests whether a property or path pattern yields a result.
+\end{itemize}
+
+The \code{WHERE} clause may be evaluated in any order by a database. When a \code{WHERE} follows a \code{MATCH}, it filters the results of that match. When it follows a \code{WITH}, it filters the rows produced by the preceding subquery.
+
+\subsubsection{Other Features}
+
+Cypher provides several additional features for advanced querying:
+
+\begin{itemize}
+    \item Shortest path functions: \code{shortestPath((a)-[*]-(b))} returns a single shortest path between two nodes. \code{allShortestPaths((a)-[*]-(b))} returns all shortest paths.
+    \item The function \code{exists} returns true if the specified \code{pattern} occurs in the graph.
+    \item The function \code{isEmpty} returns true when the given string or list (or map) is empty.
+    \item Aggregate functions: \code{count}, \code{sum}, \code{avg}, \code{min}, \code{max}, \code{collect} (gathers values into a list), \code{stDev}, \code{percentileDisc}, etc.
+    \item Implicit grouping: When a \code{WITH} or \code{RETURN} clause contains both aggregate and non-aggregate expressions, the non-aggregate expressions serve as implicit grouping keys (like \code{GROUP BY} in SQL).
+    \item \code{DESC} / \code{ASC}: Specify sort order in \code{ORDER BY}, applied per property or to the whole ordering.
+    \item \code{DISTINCT}: Eliminates duplicate rows from the result set, used after \code{RETURN} or \code{WITH} (e.g., \code{RETURN DISTINCT a.name}).
+    \item List comprehension: list comprehension is a powerful construct to operate over lists in a functional way. The syntax (expressed in Bakkus-Naur form) is 
+        \begin{center}
+            \code{<list\_comprehension> ::= [<item> IN <list> [WHERE <predicate>][| <mapping\_expression>]]}
+        \end{center}
+    \item List functions: the following functions operate in the context of a list comprehension: \code{f(<list\_comprehension>)}: 
+        \begin{itemize}
+            \item The function \code{all} returns true when the \code{predicate} is true for \emph{all} the elements of the \code{list}. For example, \code{all(n IN nodes(path) WHERE n.age > 18)}.
+            \item The function \code{any} returns true when the \code{predicate} is true for \emph{any} of the elements of the \code{list}.
+            \item The function \code{none} returns true when the \code{predicate} is true for \emph{none} of the elements of the \code{list}.
+            \item The function \code{single} returns true when the \code{predicate} is true only for a \emph{single} element of the \code{list}.
+        \end{itemize}
+    \item \code{UNWIND}: Creates a row for each element of the list. Syntax: \code{UNWIND list AS column\_name}.
+    \begin{example}{}
+        This example produces a row for each intermediate station between \code{'Montesanto'} and \code{'Mergellina'}.
+        \begin{lstlisting}[language=SQL]
+MATCH (:Station {name: 'Montesanto'})
+      (()-[link:LINK]->(s)){1,}
+      (:Station {name: 'Mergellina'})
+UNWIND s AS station
+RETURN station.name AS 'station name' 
+        \end{lstlisting}
+    \end{example}
+\end{itemize}
+
+Now, let's see two examples that comprise most of the introduced features of Cypher.
+\begin{example}{Friend Recommendation}
+    Find all pairs of persons who are not yet friends but share at least three common friends, and rank them by the number of common friends. Return up to 10 results, skipping the first 5.
+    \begin{lstlisting}[language=SQL, caption={Friend recommendation query}]
+MATCH (a:Person)-[:KNOWS]->(common:Person)<-[:KNOWS]-(b:Person)
+WHERE a <> b
+AND NOT (a)-[:KNOWS]-(b)
+WITH a, b, count(common) AS commonFriends
+WHERE commonFriends >= 3
+RETURN a.name, b.name, commonFriends
+ORDER BY commonFriends DESC
+SKIP 5
+LIMIT 10
+    \end{lstlisting}
+\end{example}
+
+\begin{example}{Path Existence and Aggregation}
+    For each person, find the shortest chain of \code{KNOWS} relationships to any person named \code{'Alice'} who works at \code{'Acme Corp'}. Return the person's name, the chain length, and the names along the path.
+    \begin{lstlisting}[language=SQL, caption={Shortest path query with aggregation}]
+MATCH (b:Person {name: 'Alice'})-[:WORKS_AT]->(:Company {name: 'Acme Corp'})
+MATCH (a:Person)
+OPTIONAL MATCH p = shortestPath((a)-[:KNOWS*]-(b))
+WITH a, p, length(p) AS distance
+ORDER BY distance ASC
+WITH a, collect(p)[0] AS shortestPath, 
+     collect(distance)[0] AS minDistance
+RETURN a.name AS person,
+       minDistance AS hopsToAlice,
+       [n IN nodes(shortestPath) | n.name] AS pathNames
+ORDER BY minDistance ASC
+    \end{lstlisting}
+\end{example}
+
+\subsubsection{Error Handling}
+
+Cypher uses the special value \code{null} to indicate missing, unknown, or erroneous values. The semantics of \code{null} in Cypher follow a three-valued logic:
+
+\begin{itemize}
+    \item Any operation or function that receives \code{null} as input typically returns \code{null} (e.g., \code{null + 5 = null}, \code{null = null \(\to\) null}).
+    \item In boolean contexts, \code{null} is treated as false (falsy semantics): if a \code{WHERE} condition evaluates to \code{null}, the row is filtered out.
+    \item A \code{null} value cannot be distinguished from an unbound variable: accessing a property that does not exist returns \code{null}.
+\end{itemize}
+
+A Cypher query fails (raises an error) in the following situations:
+
+\begin{itemize}
+    \item Syntax errors: The query string is not valid Cypher syntax.
+    \item Type errors: Certain operations require specific types and fail if given incompatible arguments (e.g., using a string where a number is required in a numeric function).
+    \item Constraint violations: Attempting to create a node or relationship that violates a uniqueness constraint or other schema constraint.
+    \item Resource exhaustion: Queries that consume excessive memory or time may be terminated by the database engine.
+    \item Division by zero: In some implementations, an explicit division by zero raises an error.
+\end{itemize}
+
+When a query fails, it returns an error to the client rather than a partial result. A \code{null} in the result, by contrast, does \emph{not} indicate query failure --- it simply signals the absence of a value for that particular row or expression.
+
+\subsection{Graph Database Design}
+
+Designing a graph database requires a shift in mindset from relational modeling: instead of normalizing data into tables and defining foreign keys, the designer focuses on identifying entities, their interactions, and the query patterns that drive the application.
+
+\subsubsection{Design Process}
+
+The design process follows a structured sequence of steps\cite{robinson2015graph}:
+
+\begin{enumerate}
+    \item \textbf{Define Nodes.} Nodes map to the \textbf{domain objects} (entities) of the application. These are the \q{nouns} in the use cases: people, products, orders, accounts, devices, locations, etc. Each node represents a distinct instance of an entity.
+
+    \item \textbf{Define Labels.} Labels are used to \textbf{group nodes into sets}, analogous to classes or types. A node can carry multiple labels, allowing flexible categorization. For example, a node representing a person who is both a customer and an employee can be labeled \code{:Person:Customer:Employee}. Labels enable efficient filtering during queries and can be indexed by the database engine.
+
+    \item \textbf{Define Relationships.} Relationships model the \textbf{interactions and connections} between nodes. These correspond to the \q{verbs} in the use cases: \emph{knows}, \emph{purchased}, \emph{works\_for}, \emph{located\_in}. Each relationship must have:
+    \begin{itemize}
+        \item A \textbf{type} (name) that describes its semantics.
+        \item A \textbf{direction} (though queries can traverse relationships in either direction).
+    \end{itemize}
+    Relationships should be fine-grained and semantically meaningful. Prefer specific types (\code{:PLACED\_ORDER}, \code{:CANCELLED\_ORDER}) over generic ones (\code{:HAS\_INTERACTION}) to make queries self-documenting and efficient.
+
+    \item \textbf{Define Properties.} Properties are determined by the \textbf{expected queries} and the functional requirements of the database. Both nodes and relationships can carry properties. The guiding questions are:
+    \begin{itemize}
+        \item What attributes are needed to filter, sort, or return data in queries?
+        \item What attributes are required by the business logic?
+        \item What attributes must be indexed for performance?
+    \end{itemize}
+    Properties that are only occasionally accessed can be separated from the core entity, but denormalization is generally preferred over joins in graph databases.
+\end{enumerate}
+
+\subsubsection{Properties vs. Relationships}
+
+A key design decision is whether to model a data element as a \textbf{property} or as a \textbf{relationship} to a separate node.
+
+\begin{example}{Property vs. Relationship}
+    Consider modeling a person's city of residence. One could use:
+    \begin{itemize}
+        \item A \textbf{property}: \code{(:Person \{city: 'Naples'\})}.
+        \item A \textbf{relationship} to a dedicated node: 
+        \begin{center}
+            \code{(:Person)-[:LIVES\_IN]->(:City \{name: 'Naples'\})}.
+        \end{center}
+    \end{itemize}
+\end{example}
+This is actually a normalization vs. denormalization problem: storing an information as a node property (denormalization) is better for reads --- the property can be directly accessed ---, but inconvenient for updates --- the property must be updated for each node, possibly causing inconsistency.
+On the other hand, storing an information as a relationship is convenient for updates --- the node that contains the information gets updated once and consistency is guaranteed ---, while being inconvenient for reads --- one hop is added per node.
+
+In general, \textbf{relationships yield cleaner queries and better performance} when:
+
+\begin{itemize}
+    \item The value is shared across many entities (avoid data duplication and enable efficient \q{who else lives in Naples?} queries).
+    \item The value itself has attributes (a city has a population, region, country---a property string cannot capture this).
+    \item The value is a filtering or aggregation criterion in queries (nodes can be indexed; property string matching is slower).
+    \item The value participates in further traversals (\q{find all people living in cities connected by a direct train}).
+\end{itemize}
+
+\noindent
+A property should remain a property when:
+
+\begin{itemize}
+    \item It is a simple, scalar attribute with no independent identity (e.g., age, birthdate, email).
+    \item It is always accessed together with the owning node.
+    \item There is no need to traverse from the value to other entities.
+\end{itemize}
+
+\subsubsection{Supernodes}
+Nodes with an extremely high number of incident relationships (e.g., a product on an e-commerce platform purchased by millions of users, or a celebrity followed by tens of millions of fans) are called \keyword{supernodes}. 
+During a graph traversal, when the query engine reaches such a node, it must examine all its incident edges to find those that satisfy the pattern. 
+If a supernode has millions of relationships, this fan-out becomes a severe performance bottleneck, even with index-free adjacency --- the \(O(1)\) cost per hop still requires iterating over a potentially enormous edge list to apply filters and pattern conditions.
+
+Mitigation strategies include:
+\begin{itemize}
+    \item \textbf{Caching:} Frequently accessed supernode data and its immediate neighborhood can be cached in memory, avoiding repeated disk I/O. Application-level caching of aggregated results (e.g., \q{top 10 followers}) can also reduce the need to traverse the supernode at query time.
+    \item \textbf{Time-bounded subgraphs:} Restrict queries to a limited time window (e.g., \q{purchases in the last 6 months}) by storing temporal metadata on relationships. This reduces the effective degree of the supernode, as only recent relationships need to be traversed.
+    \item \textbf{Introducing intermediate grouping nodes:} Break a supernode's massive edge set into smaller, manageable chunks by inserting intermediate nodes that act as \q{sharding} layers. For example, instead of connecting millions of users directly to a popular product:
+    \[
+    \text{User}_1, \text{User}_2, \dots, \text{User}_n \xrightarrow{\text{PURCHASED}} \text{Product}
+    \]
+    one can introduce intermediate \code{Region} or \code{Cohort} nodes:
+    \[
+    \text{User} \xrightarrow{\text{BELONGS\_TO}} \text{Region} \xrightarrow{\text{CONTAINS\_PURCHASE}} \text{Product}
+    \]
+    A query that previously had to scan millions of edges from the \code{Product} node can now first navigate to the relevant \code{Region} and then traverse only a subset of users. This technique trades a small increase in path length for a dramatic reduction in fan-out at any single node.
+    \item \textbf{Label-based partitioning:} Assign additional, more specific labels to relationships or nodes (e.g., \code{:RecentPurchase}, \code{:ArchivedPurchase}) to enable the query engine to filter early and avoid scanning the entire edge set.
+    \item \textbf{Asynchronous materialization:} Precompute and store the results of common queries involving supernodes (e.g., \q{total purchases per day}) as properties on the supernode itself, updated periodically, so that real-time queries can read the precomputed value instead of traversing all incident edges.
+\end{itemize}
+
+\begin{note}{Iterative Design}
+    Graph database design is inherently \textbf{query-driven} and \textbf{iterative}. 
+    Start by modeling the entities and relationships that directly support the most critical queries.
+    Test the model with realistic datasets and query workloads, then refine, adjusting label granularity, or denormalizing data to eliminate performance bottlenecks. 
+    The flexibility of the graph model makes incremental evolution far less costly than in relational systems.
+\end{note}
