@@ -1,0 +1,859 @@
+\chapter{Resource Description Framework}
+The Resource Description Framework (RDF) is a standard for exchanging graphs. RDF allows the specification of graphs that are directed, edge-labelled, and constitute a restricted form of multi-graph where multiple edges can exist between two nodes only if these edges have different labels. RDF was introduced by the W3C as a foundational technology for the Semantic Web, aiming to provide a common data model for describing resources and their interrelationships in a machine-understandable way. The fundamental idea is to represent information as simple statements about resources, making it possible to merge data from diverse sources seamlessly and to reason about that data using formal logics.
+
+\section{RDF Graphs}
+RDF graphs are strictly connected to IRIs, which serve as the global identifiers that give resources unambiguous names on the Web. By using IRIs instead of local identifiers, RDF enables data integration across independently developed datasets: when two datasets use the same IRI to refer to the same entity, merging them automatically connects the information about that entity without the need for manual schema alignment. The structure of an RDF graph is that of a set of triples, each asserting a binary relationship between a subject and an object via a predicate. Despite the simplicity of this model, it is expressive enough to encode complex, semi-structured data.
+
+\subsection{URIs and IRIs}
+\begin{definition}{URI}
+    A Uniform Resource Identifier (URI\cite{rfc3986}) is a global identifier for a resource on the Web, uniquely identifying an abstract or physical resource.
+    The syntax of a URI (expressed in Bakkus-Naur form) is:
+    \begin{lstlisting}
+URI = scheme ":" hier-part [ "?" query ] [ "#" fragment ]
+
+hier-part = "//" authority path-abempty
+            | path-absolute
+            | path-rootless
+            | path-empty
+    \end{lstlisting}
+    where \code{scheme} defines the protocol (e.g. \code{https}), \code{authority} typically corresponds to a domain host, \code{path-abempty} is a \code{/}-starting path, \code{query} is a \code{\&}-separated list of \code{key=value} pairs and allows to identify a resource (or more) by its (or their) attributes rather than its exact name (path), \code{fragment} is an identifier of an item inside the primary resource identified by the URI without the fragment.
+\end{definition}
+
+A URL (Uniform Resource Locator) is an informal way to refer to URIs that specify the location of a digital document.
+
+\begin{definition}{IRI}
+    An Internationalized Resource Identifier (IRI) is a generalisation of URIs that supports characters from the Universal Character Set (Unicode/ISO 10646), whereas URIs are limited to a subset of ASCII.
+\end{definition}
+
+We will use the term URI and IRI interchangeably from now on.
+
+RDF uses IRIs as edge labels and to define resources that are represented as nodes of the graph. There are standard, integrated IRIs that are commonly used to express objects and relationships. While IRIs seem to be fairly complicated to read—they are indeed—RDF graphs typically do not show them to the end user, but show human-readable labels instead.
+
+\begin{note}{}
+    We cannot assume that all RDF data in the world is integrated, i.e. uses IRIs in the same way.
+\end{note}
+
+When manipulating an RDF graph, we can either reuse existing IRIs (supporting information integration with existing data) or create new ones (to avoid confusion). In general, one should check if an IRI can be reused to support integration; use useful protocols like HTTP(S); create IRIs based on domains that they own; and avoid using URLs of existing pages as identifiers unless they intend to store data about those specific pages. This last point is important because a URL identifies the location of a Web document, not the real-world entity the document describes. For instance, \texttt{http://dbpedia.org/page/Alan\_Turing} is a Wikipedia-like page about Alan Turing, whereas \texttt{http://dbpedia.org/resource/Alan\_Turing} (without \texttt{page}) is the IRI that actually identifies the person Alan Turing in the DBpedia knowledge graph. Using the former as an identifier would conflate the Web page with the person, which can cause problems when integrating data: statements about the page (e.g., its author, its modification date) would be indistinguishable from statements about the person (e.g., his birth date, his contributions to computer science). This distinction is often referred to as the \emph{httpRange-14} issue.
+
+\subsection{Retrieving Information}
+One should make IRIs return useful content via HTTP(S) to help others get information about the pointed resources (this can be done with fragments and redirects). An IRI can offer several documents in different formats, and the client can specify its preference using content negotiation. For example, using \texttt{curl} with an \texttt{Accept} header, one can request the resource \texttt{http://dbpedia.org/resource/Alan\_Turing} in HTML or in RDF/XML:
+
+\begin{lstlisting}[language=bash, caption=Content negotiation with curl]
+# Request HTML representation
+curl -H "Accept: text/html" http://dbpedia.org/resource/Alan_Turing
+
+# Request RDF/XML representation
+curl -H "Accept: application/rdf+xml" http://dbpedia.org/resource/Alan_Turing
+\end{lstlisting}
+
+The server inspects the \texttt{Accept} header and returns the appropriate representation if available, or responds with a redirect to the relevant document.
+
+\subsection{Datatypes}
+RDF supports many different data types based on the XML Schema (XSD). A datatype in RDF is specified by a value space (the set of abstract, semantic values), a lexical space (the set of all valid strings, so merely syntactic), and a lexical-to-value mapping (which maps syntax to semantics). 
+A datatype must be identified by an IRI. Common datatypes are summarised in \cref{tab:datatypes}.
+
+\begin{table}[H]
+\centering
+\caption{Common RDF datatypes}
+\label{tab:datatypes}
+\begin{tabular}{@{}p{3.8cm}p{4.2cm}p{5cm}@{}}
+\toprule
+\textbf{Name} & \textbf{Value Space} & \textbf{Lexical Space} \\
+\midrule
+\texttt{xsd:integer} & The set of all integers & Decimal numerals with an optional sign \\
+\texttt{xsd:string} & All finite-length strings of characters & Any sequence of characters \\
+\texttt{xsd:date} & Gregorian calendar dates & \texttt{YYYY-MM-DD} with optional timezone \\
+\texttt{xsd:boolean} & \{\texttt{true}, \texttt{false}\} & \texttt{true}, \texttt{false}, \texttt{1}, \texttt{0} \\
+\texttt{xsd:decimal} & Arbitrary-precision decimal numbers & Decimal numerals with optional sign and decimal point \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Data Values}
+IRIs should not represent data values such as numbers, strings, or times: they can be infinite, they are not specific to any particular context, and they are interpreted. Data values in RDF are written in the following format and are drawn as rectangular nodes: 
+\begin{center}
+    \code{"lexical form"\textasciicircum\textasciicircum datatypeIRI}
+\end{center}
+
+If the given string is not a valid lexical value for its declared datatype, the literal is ill-typed.
+
+\subsubsection{Language-specific Strings}
+One can specify a language-tagged string by appending a language tag:
+\begin{center}
+    \code{"lexical form"\textasciicircum\textasciicircum language-tag}
+\end{center}
+For example, \texttt{"cat"@en}, \texttt{"chat"@fr}, \texttt{"Katze"@de}. 
+This special case of literal is widely used to encode human-readable labels in multiple languages.
+
+\subsection{Blank Nodes}
+RDF allows the specification of nodes that are not identified by an IRI. These are called blank nodes or bnodes. They are used to express that something exists at a given position in the graph, but without identifying a specific named object. They are analogous to existentially quantified variables in logic. Nowadays bnodes are generally avoided in favour of named IRIs, but they still occur in the RDF-encoding of the OWL Web Ontology Language.
+
+\section{RDF Graphs}
+\begin{definition}{RDF Graph}
+    An RDF graph is a set of triples, each consisting of a \textbf{subject} (an IRI or a blank node), a \textbf{predicate} (an IRI), and an \textbf{object} (an IRI, a blank node, or a literal). Ill-typed literals are syntactically permitted in the abstract syntax.
+\end{definition}
+
+RDF graphs are syntactic, not semantic: graphs are not interpreted when defined. 
+
+\begin{definition}{Property}
+    The nodes represented by predicates are called properties.
+\end{definition}
+
+For example, consider the statement "Alice knows Bob". In RDF, this could be expressed with the triple \texttt{(Alice, knows, Bob)}. 
+Here, \texttt{knows} is the property that connects the two resources \texttt{Alice} and \texttt{Bob}. 
+Properties are themselves resources identified by IRIs and can therefore appear as subjects or objects in other triples. 
+For instance, one might assert metadata about the property itself: \texttt{(knows, domain, Person)} states that the domain of the \texttt{knows} property is the class of persons, and \texttt{(knows, range, Person)} states that its range is also the class of persons. 
+This \keyword{self-explainability} of RDF graphs is a key feature and makes RDF graph actually hypergraphs: they can be seen as two layer graphs: the first layer contains the actual information (normal subjects, predicates, objects), while the second layer describes the symbols of the first layer.
+In fact, relationships between nodes and properties are usually not displayed as separate nodes. In other words, only the first layer is typically shown.
+
+\section{Graph Serialization}
+We have described how to abstractly define an RDF graph, but we need a concrete syntax to exchange graphs. Many syntactic formats are available: N-Triples, Turtle, JSON-LD, RDF/XML, and RDFa. Other legacy formats exist but are nowadays irrelevant.
+
+To illustrate the various serializations, consider the following small RDF graph, where we omit IRIs for readability:
+
+\begin{center}
+\begin{tikzpicture}[
+    node distance=2cm,
+    entity/.style={ellipse, draw, fill=blue!20, minimum width=1.5cm, align=center},
+    literal/.style={rectangle, draw, fill=green!20, minimum width=1.5cm, align=center},
+    property/.style={font=\small, above, sloped}
+]
+
+% Nodes
+\node[entity] (alice) {Alice};
+\node[entity, right=of alice] (bob) {Bob};
+\node[literal, below=of alice] (aliceName) {Alice};
+\node[literal, below=of bob] (bobName) {Bob};
+\node[literal, right=of bob] (bobAge) {42};
+\node[entity, above=of alice] (personAlice) {Person};
+\node[entity, above=of bob] (personBob) {Person};
+
+% Edges
+\draw[->] (alice) -- node[property] {type} (personAlice);
+\draw[->] (bob) -- node[property] {type} (personBob);
+\draw[->] (alice) -- node[property] {name} (aliceName);
+\draw[->] (bob) -- node[property] {name} (bobName);
+\draw[->] (alice) -- node[property] {knows} (bob);
+\draw[->] (bob) -- node[property] {age} (bobAge);
+
+\end{tikzpicture}
+\end{center}
+
+\subsection{N-Triples}
+In N-Triples, each line encodes a single triple. IRIs are written enclosed in angle brackets, blank nodes as \texttt{\_:label}, and literals as quoted strings optionally followed by \texttt{\textasciicircum\textasciicircum} and a datatype IRI or by a language tag. Each triple is terminated with a dot. The example graph in N-Triples is:
+
+\begin{lstlisting}[caption=Example graph in N-Triples]
+<http://example.org/Alice> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://xmlns.com/foaf/0.1/Person> .
+<http://example.org/Alice> <http://xmlns.com/foaf/0.1/name> "Alice" .
+<http://example.org/Alice> <http://xmlns.com/foaf/0.1/knows> <http://example.org/Bob> .
+<http://example.org/Bob> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://xmlns.com/foaf/0.1/Person> .
+<http://example.org/Bob> <http://xmlns.com/foaf/0.1/name> "Bob" .
+<http://example.org/Bob> <http://xmlns.com/foaf/0.1/age> "42"^^<http://www.w3.org/2001/XMLSchema#integer> .
+\end{lstlisting}
+
+N-Triples is very fast and easy to parse, but inefficient in terms of storage space because IRIs are repeated in full for every triple.
+
+\subsection{Turtle}
+Turtle extends N-Triples with convenient abbreviations. The \texttt{@prefix} directive declares namespace prefixes, \texttt{@base} sets a base IRI. A semicolon repeats the subject, a comma repeats both subject and predicate. Blank nodes can be written with square brackets containing predicate-object pairs. The example graph in Turtle is:
+
+\begin{lstlisting}[caption=Example graph in Turtle]
+@prefix ex: <http://example.org/> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+
+ex:Alice a foaf:Person ;
+    foaf:name "Alice" ;
+    foaf:knows ex:Bob .
+
+ex:Bob a foaf:Person ;
+    foaf:name "Bob" ;
+    foaf:age 42 .
+\end{lstlisting}
+
+\begin{note}{}
+    Note the use of the keyword \texttt{a} as a shorthand for \texttt{rdf:type}, and the fact that \texttt{42} is written without an explicit datatype because Turtle maps plain integer numerals to \texttt{xsd:integer} by default.
+\end{note}
+
+\subsection{JSON-LD}
+JSON-LD encodes the RDF graph as a JSON object. IRIs are shortened using a \texttt{@context} mapping, subjects are JSON objects identified by their IRI as the key, and properties become keys within those objects. The example graph in JSON-LD is:
+
+\begin{lstlisting}[caption=Example graph in JSON-LD]
+{
+  "@context": {
+    "ex": "http://example.org/",
+    "foaf": "http://xmlns.com/foaf/0.1/"
+  },
+  "@graph": [
+    {
+      "@id": "ex:Alice",
+      "@type": "foaf:Person",
+      "foaf:name": "Alice",
+      "foaf:knows": { "@id": "ex:Bob" }
+    },
+    {
+      "@id": "ex:Bob",
+      "@type": "foaf:Person",
+      "foaf:name": "Bob",
+      "foaf:age": 42
+    }
+  ]
+}
+\end{lstlisting}
+
+\subsection{Other Forms}
+RDF/XML is an XML-based syntax that was the original standard for RDF serialization. RDFa (RDF in Attributes) embeds RDF data within HTML attributes, allowing structured data to be integrated directly into Web pages.
+
+\section{RDF Datasets}
+An RDF dataset is a collection of RDF graphs, consisting of exactly one default graph and zero or more named graphs identified by an IRI. 
+Datasets introduce the notion of grouping triples into separate graphs, which enables several powerful features, such as: 
+
+\begin{itemize}
+    \item \emph{Provenance tracking}: Triples can be placed in named graphs that record their origin, such as the source dataset from which they were extracted or the time at which they were added. 
+
+    \item \emph{Data access control:} Different named graphs can represent different visibility scopes, with some graphs being public and others restricted to certain users.
+\end{itemize}
+
+In practice, RDF datasets are often stored as quads (subject, predicate, object, graph) rather than triples. 
+The fourth element identifies the graph to which the triple belongs. 
+
+The default graph is a special graph that, by convention, contains triples that are not explicitly assigned to any named graph, or it can be configured to contain the union of some or all named graphs. 
+
+\section{Limitations}
+Since an RDF triple encodes a binary relationship, representing a relationship of higher arity (e.g., a purchase involving a buyer, seller, object, and price) requires a workaround. The standard approach is \keyword{reification}: introducing a new resource that represents the relationship and attaching the components as separate binary properties of that resource. For example, consider a relational table \texttt{Purchases} with columns \texttt{buyer}, \texttt{seller}, \texttt{item}, and \texttt{price}:
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{cccc}
+        \toprule
+        \textbf{buyer} & \textbf{seller} & \textbf{item} & \textbf{price} \\
+        \midrule
+        Alice & Bob & Laptop & 1200 \\
+        Carol & Dave & Phone & 800 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+Using RDB2RDF (Relational Database to RDF), one defines a mapping that transforms each row into a set of triples. 
+Each row becomes a new resource (a blank node or an IRI), and each column becomes a property of that resource. 
+The mapping for the \texttt{Purchases} table would produce, for the first row, the following triples in Turtle:
+
+\begin{lstlisting}[caption=RDB2RDF output for a purchase]
+@prefix ex: <http://example.org/> .
+
+ex:purchase-1 a ex:Purchase ;
+                ex:buyer ex:Alice ;
+                ex:seller ex:Bob ;
+                ex:item ex:Laptop ;
+                ex:price 1200 .
+\end{lstlisting}
+
+Here, \texttt{ex:purchase-1} is the new resource introduced to reify the purchase relationship, and the four columns become four separate binary properties. 
+
+Another limitation is that, since the triples in an RDF graph are unordered, representing ordered lists has no single standard solution. Two common approaches are: 
+
+\begin{itemize}
+    \item \emph{RDF Collections} model ordered lists as linked list structures using the vocabulary \texttt{rdf:first} and \texttt{rdf:rest}, with \texttt{rdf:nil} terminating the list. The following graph represents the ordered list \texttt{[Alice, Bob, Carol]}:
+
+\begin{lstlisting}[caption={RDF Collection for Alice, Bob, Carol}]
+@prefix ex: <http://example.org/> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+
+ex:list rdf:first ex:Alice ;
+        rdf:rest [ rdf:first ex:Bob ;
+                   rdf:rest [ rdf:first ex:Carol ;
+                              rdf:rest rdf:nil ] ] .
+\end{lstlisting}
+
+    Each node in the linked list has a \texttt{rdf:first} property pointing to the element and an \texttt{rdf:rest} property pointing to the remainder of the list. Blank nodes (written with square brackets) represent the intermediate cons cells. This structure allows arbitrary-length lists but can be cumbersome to traverse.
+
+    \item \emph{RDF Containers} represent order using indexed membership properties: \texttt{rdf:\_1}, \texttt{rdf:\_2}, and so on. The same list \texttt{[Alice, Bob, Carol]} as an RDF Container (\texttt{rdf:Seq}) is:
+
+    \begin{lstlisting}[caption={RDF Container for Alice, Bob, Carol}]
+@prefix ex: <http://example.org/> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+
+ex:list rdf:type rdf:Seq ;
+        rdf:_1 ex:Alice ;
+        rdf:_2 ex:Bob ;
+        rdf:_3 ex:Carol .
+    \end{lstlisting}
+
+    Containers are more compact than Collections for small lists, but they do not guarantee that the indices form a contiguous sequence.
+\end{itemize}
+
+\section{SPARQL}
+SPARQL (SPARQL Protocol and RDF Query Language) is the standard query language for RDF graphs, standardized by the W3C. The SPARQL specification consists of several major parts:
+\begin{itemize}
+    \item A \textbf{query language} for retrieving and manipulating RDF data.
+    \item \textbf{Result formats} (e.g., XML, JSON, CSV, TSV) for encoding query results.
+    \item An \textbf{update language} (SPARQL Update) for inserting, modifying, and deleting RDF triples.
+    \item \textbf{Protocols} for communicating with online SPARQL services (SPARQL Protocol), typically over HTTP.
+    \item A \textbf{vocabulary} for describing SPARQL services (SPARQL Service Description).
+\end{itemize}
+
+\subsection{Queries}
+SPARQL queries use \keyword{variables}, which are marked with an initial \code{?} (or \code{\$}). Variables can appear in the position of subjects, predicates, or objects within \keyword{triple patterns}, and are matched against the corresponding elements in the RDF graph. The syntax of SPARQL closely resembles Turtle (the standard RDF serialization format), making it natural to read and write for those familiar with RDF.
+
+The structure of a SPARQL \code{SELECT} query consists of the following clauses, in order:
+\begin{enumerate}
+    \item \textbf{Prologue}: An optional sequence of \code{PREFIX} declarations (and optionally \code{BASE}) that define namespace abbreviations used throughout the query, exactly as in Turtle.
+    \item \textbf{Select clause} (\code{SELECT}): Specifies which variables to project in the result set. This clause can also include aggregation, expressions (\code{SELECT ?x (COUNT(?y) AS ?count)}), and the \code{DISTINCT} or \code{REDUCED}\footnote{If \code{REDUCED} is specified, the query engine may remove duplicates, but it is not obligated to do so like with \code{DISTINCT}.} modifiers.
+    \item \textbf{Where clause} (\code{WHERE}): Contains the graph pattern to be matched against the RDF graph. The body of the \code{WHERE} clause is a \keyword{basic graph pattern} enclosed in braces, potentially combined with other pattern operators (\code{UNION}, \code{OPTIONAL}, \code{FILTER}, etc.).
+    \item \textbf{Solution set modifiers}: Optional clauses applied after pattern matching, including \code{ORDER BY}, \code{LIMIT}, \code{OFFSET}, and \code{GROUP BY} (when used with aggregation).
+\end{enumerate}
+
+\begin{definition}{Variable}
+    A \keyword{variable} is a string that begins with \code{?} (or \code{\$}), where the string can comprise letters, numbers and the underscore symbol. The variable name is the string after the leading symbol.
+\end{definition}
+
+\begin{definition}{Triple Pattern}
+    A \keyword{triple pattern} is a triple \(\langle s, p, o\rangle\), where \(s\) and \(o\) are arbitrary RDF terms or variables, and \(p\) is an IRI or variable.
+\end{definition}
+
+\begin{definition}{Basic Graph Pattern}
+    A \keyword{basic graph pattern} (BGP) is a set of triple patterns, interpreted as in conjunction (i.e., all triple patterns must match simultaneously).
+\end{definition}
+
+When working with blank nodes (bnodes), one can associate a temporary identifier to a bnode within a query, so that the same bnode can be referenced in multiple triple patterns. This allows the query to track occurrences of that specific bnode across the pattern.
+A \keyword{bnode identifier} in a query is written like a variable but with \code{\_:} as the leading marker (e.g., \code{\_:x}) instead of \code{?}, and \textbf{cannot appear in the \code{SELECT} clause}. 
+Alternatively, the shorthand \code{[]} can be used for an anonymous (unnamed) blank node that appears only once.
+
+A given bnode identifier can appear only once per query part\footnote{A \q{query part} refers to each syntactically distinct sub-query or group graph pattern; the same bnode identifier may be reused in separate sub-queries, though best practice is to use fresh labels for clarity.}.
+
+Moreover, one can combine multiple BGPs in the same \code{WHERE} clause by juxtaposing \keyword{group graph patterns}.
+
+\begin{definition}{Group Graph Pattern}
+    A group graph pattern (GGP) is a pattern expressed inside a pair of curly braces \code{\{...\}}.
+\end{definition}
+
+GGPs are combined using the \code{Join} operation: %explain
+
+\subsubsection{Query Results}
+\begin{definition}{Solution Mapping}
+    A \keyword{solution mapping} \(\mu\) is a partial function\footnote{A function is said \emph{partial} when it does not map every point of the domain, unlike a \emph{total} function which does.} from the set of variable names to the set of RDF terms.
+\end{definition}
+The function is partial because a given solution mapping typically binds only the variables that appear in the query's \code{WHERE} clause, and not every possible variable name. 
+This reflects the fact that a query result provides bindings only for the variables it actually used.
+
+\begin{definition}{Solution Multiset}
+    A \keyword{solution multiset} is a multiset\footnote{Compared to a set, a multiset allows multiple occurrences of identical elements. This means that, in a multiset, each item is associated with a cardinality.} of solution mappings.
+\end{definition}
+
+\begin{definition}{Solution}
+    Given an RDF graph \(G\) and a BGP \(P\), a solution mapping \(\mu\) is a \keyword{solution} if it is defined exactly on the variables in \(P\) and there exists a mapping \(\sigma\) from blank nodes to RDF terms such that \(\mu(\sigma(P))\subseteq G\), i.e. \(\mu(\sigma(P))\) is a subgraph of \(G\).
+    
+    The \textbf{cardinality} of \(\mu\) in the solution multiset is the number of distinct \(\sigma\) mappings that satisfy the condition.
+\end{definition}
+
+We denote the multiset as \(\text{eval}_G(P)\). Now, let's examine an example to better understand the notion of cardinality.
+
+\begin{example}{}
+    Let's consider the following graph \(G\) in Turtle syntax:
+    \begin{lstlisting}[style=csstyle]
+eg:Arrival eg:actorRole eg:aux1, eg:aux2 .
+eg:aux1 eg:actor eg:Adams ;
+        eg:character "Louise Banks" .
+eg:aux2 eg:actor eg:Renner ;
+        eg:character "Ian Donnelly" .
+eg:Gravity eg:actorRole [
+    eg:actor eg:Bullock ;
+    eg:character "Ryan Stone"
+] .
+    \end{lstlisting}
+
+    The BGP \code{?film eg:actorRole []} yields two solutions \(\mu_1, \mu_2\), where \(\mu_1\) binds \code{?film} to \code{eg:Arrival} with \(\#\mu_1 = 2\) --- the blank node in the BGP can be mapped to both \code{eg:aux1} and \code{eg:aux2} to find a matching subgraph ---, and \(\mu_2\) binds \code{?film} to \code{eg:Gravity}, with \(\#\mu_2 = 1\).
+
+    Now, the BGP \code{?film eg:actorRole [ eg:actor ?person]} yields three solutions, each with cardinality one: \{\code{?film} \(\mapsto\) \code{eg:Arrival}, \code{?person} \(\mapsto\) \code{eg:Adams}\}, \{\code{?film} \(\mapsto\) \code{eg:Arrival}, \code{?person} \(\mapsto\) \code{eg:Renner}\}, and \{\code{?film} \(\mapsto\) \code{eg:Gravity}, \code{?person} \(\mapsto\) \code{eg:Bullock}\}.
+    This happens because, once we map the blank node to \code{eg:aux1} (resp. \code{eg:aux2}), the property \code{eg:actor} forces a specific binding for \code{?person}, yielding two separate solution mappings that do not depend on any further blank node mapping \(\sigma\).
+    
+    In general, if the blank node is \q{opaque} (not connected to any variable), multiple \(\sigma\) choices collapse into a single \(\mu\), and the cardinality counts how many distinct ways the blank node could have been assigned. 
+    If the blank node's properties are exposed via a variable, different \(\sigma\) choices produce genuinely different \(\mu\) mappings, and each is counted separately with cardinality 1 (assuming no other ambiguity remains). 
+\end{example}
+
+Lastly, let's consider \q{ground}\footnote{In logics, a formula is ground when it does not contain variables.} queries, usually called \keyword{boolean queries}. An example of ground query for the previous example is 
+\begin{lstlisting}[language=bash]
+SELECT *
+WHERE eg:Arrival eg:actorRole eg:aux1 .
+
+# output: true
+\end{lstlisting}
+Such a query can admit only two solutions: \(\set{}\) (false: the pattern did not match) and \(\set{\emptyset}\) (true: the pattern did match, where \(\emptyset\) denotes the empty mapping).
+
+\subsubsection{Other Query Forms}
+Beyond the basic \code{SELECT} form, SPARQL provides three additional query forms:
+
+\begin{itemize}
+    \item \textbf{ASK}: A boolean query that tests whether a graph pattern has at least one solution. It returns \code{true} or \code{false}, with no variable bindings. This is useful for checking the existence of certain data without retrieving it.
+    
+    \item \textbf{CONSTRUCT}: Builds and returns a new RDF graph by substituting variables in a template graph pattern with the bindings obtained from the \code{WHERE} clause. This allows transforming or reshaping RDF data. For example, one might convert data from one vocabulary to another by constructing new triples based on existing patterns.
+    
+    \item \textbf{DESCRIBE}: Returns an RDF graph that \q{describes} the resources matched by the query. The exact form of the description is implementation-dependent: the SPARQL service decides which triples to include to provide a useful description of the identified resources. This form is useful for exploring unknown data or retrieving a concise bounded description of a resource.
+\end{itemize}
+
+\subsection{Advanced SPARQL Querying}
+Basic SPARQL relies on basic graph patterns, but BGPs are not powerful enough to express complex queries in a succint way. For example, how would one express, using BGPs only, the query \q{find the descendants of J.S. Bach}? 
+It would be necessary to express not only direct connections, but also indirect ones.
+
+\begin{definition}{Property Path}
+    In an RDF graph \(G\), we can see a path as a sequence of concatenated triple patterns where the object of a triple is the subject of the following one.
+    A \keyword{property path} is the sequence of the predicates of a path.
+\end{definition}
+
+Let's make an example to better understand this concept.
+\begin{example}{}
+    Let's consider the following RDF graph in Turtle syntax:
+    \begin{lstlisting}
+@prefix eg: <http://example.com>
+
+eg:Alice eg:knows eg:Bob
+eg:Bob eg:knows eg:Jim
+eg:Jim eg:knows eg:Frank
+    \end{lstlisting}
+
+    The longest path of this graph is
+    \begin{center}
+        \code{eg:Alice eg:knows eg:Bob eg:knows eg:Jim eg:knows eg:Frank}
+    \end{center}
+    and its lenght is \(3\), which is the number of predicates.
+    The associated property path is \code{eg:knows -> eg:knows -> eg:knows}.
+\end{example}
+
+A \keyword{property path} can be expressed in regex-like form:
+\begin{table}[H]
+    \centering
+    \caption{SPARQL Property Path Syntax}
+    \label{tab:property-path}
+    \begin{tabular}{@{}c|l|l@{}}
+        \toprule
+        \textbf{Construct} & \textbf{Syntax} & \textbf{Meaning} \\
+        \midrule
+        IRI & \code{iri} & The predicate itself (length 1) \\
+        Reverse & \code{\textasciicircum pp} & Inverse path (subject and object swapped) \\
+        Sequence & \code{pp1 / pp2} & Concatenation of paths \\
+        Alternative & \code{pp1 | pp2} & Either path \\
+        Zero or more & \code{pp*} & Path repeated 0 or more times \\
+        One or more & \code{pp+} & Path repeated 1 or more times \\
+        Zero or one & \code{pp?} & Optional path (0 or 1 occurrence) \\
+        Negated property set & \code{!(iri1|...|irin)} & Any IRI \emph{not} in the set \\
+        Negated inverse set & \code{!(\textasciicircum iri1|...|\textasciicircum irin)} & Any IRI whose inverse is \emph{not} in the set \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+\begin{note}{}
+    The precedence between operators is \code{!} \(\succ\) \code{*/+/?} \(\succ\) \code{\textasciicircum} \(\succ\) \code{/} \(\succ\) \code{|}. Negated property sets must always be enclosed in parentheses.
+\end{note}
+
+\begin{definition}{Property Path Pattern}
+    A \keyword{property path pattern} is a triple \(\langle s, p, o\rangle\), where \(s\) and \(o\) are arbitrary RDF terms and \(p\) is a property path.
+\end{definition}
+
+As for triple patterns, the described syntax is purely abstract: we need a way to practically represent it.
+This is done by extending the Turtle syntax, allowing property paths to take place of predicates.
+
+\begin{definition}{\(\Path{}\)}
+    For a property path \(PP\), the set \(\Path{PP}\) is 
+    \[
+    \Path{PP} = \begin{cases}
+        \{\text{iri}\} & PP=\text{iri}  \\[4pt]
+        \Path{PP} \setminus \bigcup_{i=1}^{n}\Path{\text{iri}_i} & PP=!(\text{iri}_1|\ldots |\text{iri}_n) \\[4pt]
+        \Path{PP} \setminus \bigcup_{i=1}^{n}\Reversed{\Path{\text{iri}_i}} & PP=!(\text{\textasciicircum iri}_1|\ldots | \text{\textasciicircum iri}_n) \\[4pt]
+        \bigcup_{i \geq 0}PP^i & PP=PP^* \\[4pt]
+        \bigcup_{i \geq 1}PP^i & PP=PP^+ \\[4pt]
+        \Path{PP} \cup \{\varepsilon\} & PP=PP? \\[4pt]
+        \Reversed{PP} & PP=\text{\textasciicircum}PP \\[4pt]
+        \Path{PP_1} \circ \Path{PP_2} & PP=PP_1/PP_2 \\[4pt]
+        \Path{PP_1} \cup \Path{PP_2} & PP=PP_1|PP_2
+    \end{cases}
+    \]
+
+    where the following language operations are assumed:
+    \begin{align*}
+        L_1 \circ L_2 &= \{w_1w_2 : w_1 \in L_1, w_2 \in L_2\} \\
+        L^0 &= \{\varepsilon\} \\
+        L^{i+1} &= L^{i} \circ L \\
+        L^* &= \bigcup_{i \geq 0}L^i
+    \end{align*}
+
+    and \(\Reversed{PP}\) makes \(PP\) reversed.  
+\end{definition}
+Now, we can define a solution for a property path pattern.
+
+\begin{definition}{Solution for a Property Path Pattern}
+    Given an RDF graph \(G\) and a property path pattern \(P=\langle s, pp, o \rangle\), a solution mapping \(\mu\) is a solution if and only if there is a bnode mapping \(\sigma\) s.t. \(G\) contains a property path from \(\mu(\sigma(s))\) to \(\mu(\sigma(o))\) containing only predicates in \(\Path{pp}\).
+\end{definition}
+Moreover, empty paths (\(\varepsilon\)) exist from any node to itself.
+
+Now, we have to explain a bit on how solutions are found by the query engine, so that we will understand some of its unintuitive features.
+The official SPARQL 1.1 algebra says that property paths built with \code{*}, \code{+}, \code{?} are evaluated via an ALP (Arbitrary Length Path) algorithm, which is essentially a graph-reachability search. So, ALP searches if a path from \(s\) to \(o\) exists and does not search for all possible paths between these two nodes. 
+So, a query containing a property path pattern that comprises \code{*}, \code{+}, \code{?} will yield, if found, a single solution.
+On the other hand, property paths that are built only with operators that don't involve unbounded repetition (\code{iri}, \code{\textasciicircum}, \code{/}, \code{|}, \code{!}) are evaluated by composing simple triple patterns with unions and joins between the intermediate solution multisets.
+
+\begin{example}{}
+    Consider the following RDF graph in Turtle syntax, describing two independent chains of \code{eg:knows} relations connecting \code{eg:Alice} to \code{eg:Dave}:
+    \begin{lstlisting}
+@prefix eg: <http://example.com/>
+
+eg:Alice eg:knows eg:Bob , eg:Carol .
+eg:Bob   eg:knows eg:Dave .
+eg:Carol eg:knows eg:Dave .
+    \end{lstlisting}
+    There are exactly two distinct paths of length \(2\) from \code{eg:Alice} to \code{eg:Dave}: one through \code{eg:Bob} and one through \code{eg:Carol}.
+
+    Let's evaluate two different, but semantically related, property path patterns against this graph.
+
+    \textbf{Query A: using \(+\) (ALP evaluation)}
+    \begin{lstlisting}
+SELECT ?o WHERE {
+    eg:Alice eg:knows+ ?o .
+}
+    \end{lstlisting}
+    Since \code{+} triggers the ALP algorithm, the engine only checks \emph{reachability} of \code{?o} from \code{eg:Alice} via one or more \code{eg:knows} edges. Even though \code{eg:Dave} is reachable via \emph{two} distinct paths, it is recorded as reachable \emph{once}. The result set is
+    \[
+        \{\mu_1(?o)=\text{eg:Bob}, \mu_2(?o)=\text{eg:Carol}, \mu_3(?o)=\text{eg:Dave}\}
+    \]
+    with \(\mu_3\) appearing only once, regardless of how many ways there are to reach \code{eg:Dave}.
+
+    \textbf{Query B: using \(/\) (Join evaluation).}
+    \begin{lstlisting}
+SELECT ?o WHERE {
+    eg:Alice eg:knows/eg:knows ?o .
+}
+    \end{lstlisting}
+    Here \code{eg:knows/eg:knows} is evaluated as
+    \[
+        \text{Join}\big(\text{eval}(\text{eg:Alice}, \text{eg:knows}, ?v),\ \text{eval}(?v, \text{eg:knows}, ?o)\big),
+    \]
+    that is a join over the intermediate variable \code{?v}. Since \code{?v} can bind to both \code{eg:Bob} and \code{eg:Carol}, and both lead to \code{eg:Dave}, the join produces \emph{two} solution mappings that agree on \code{?o}:
+    \[
+        \{\mu_1(?o)=\text{eg:Dave}, \mu_2(?o)=\text{eg:Dave}\}.
+    \]
+\end{example}
+
+\subsection{Query Modifiers}
+Now that we have largely talked about the patterns inside the \code{WHERE} clause, let's focus on other clauses that can be used in a SPARQL query. 
+Let's start with the projection clause i.e. (\code{SELECT}).
+
+\subsubsection{\code{SELECT} Clause}
+\begin{definition}{Projection of a Solution Mapping}
+    Given a solution mapping \(\mu\), we define its \keyword{projection} \(\pi=\mu|_{V}\) as its restriction to \(V\), that is a set of variables.
+    The cardinality of \(\pi\) inside the new solution multiset \(\Pi\) is the sum of cardinalities of all \(\nu\in\Omega\) s.t. \(\nu|_{V}=\pi\), where \(\Omega\) is the staring solution multiset.
+\end{definition}
+
+To make all the solutions of a solution multiset have cardinality one, we have to use the \code{DISTINCT} modifier of the \code{SELECT} clause (i.e., \code{SELECT DISTINCT}).
+
+\subsubsection{Solution Multiset Modifiers}
+After the \code{WHERE} clause, SPARQL provides several modifiers to shape the final result set:
+
+\begin{itemize}
+    \item \code{ORDER BY}: Sorts the solution sequences according to the value of one or more expressions. The sort order can be ascending (\code{ASC()}) or descending (\code{DESC()}). If neither is specified, ascending order is the default. For example, \code{ORDER BY DESC(...)}.
+    
+    \item \code{LIMIT}: Restricts the number of solutions returned to at most the specified integer value. For example, \code{LIMIT 10} returns at most 10 solutions. Note that \code{LIMIT} is applied after \code{ORDER BY}, so it is typically used to obtain \q{top-\(k\)} results.
+    
+    \item \code{OFFSET}: Causes the solutions generated to start after the specified number of solutions. This is useful for pagination when combined with \code{LIMIT} and \code{ORDER BY} (the latter ensures deterministic ordering, which is otherwise not guaranteed by the SPARQL specification).
+\end{itemize}
+
+The order of application of these modifiers is fixed: first \code{ORDER BY}, then \code{OFFSET}, then \code{LIMIT}.
+
+\subsubsection{Grouping and Aggregate Functions}
+The \code{GROUP BY} clause partitions the solution sequence into groups based on the values of specified expressions. After grouping, aggregate functions can be applied to each group to compute a single representative value. Common aggregate functions include:
+
+\begin{itemize}
+    \item \code{COUNT(* | ?var | DISTINCT ?var)}: Counts the number of solutions (or distinct values) in the group.
+    \item \code{SUM(?var)}: Computes the numeric sum of the values of \code{?var} over the group.
+    \item \code{MIN(?var)} / \code{MAX(?var)}: Returns the minimum or maximum value of \code{?var} in the group.
+    \item \code{AVG(?var)}: Computes the arithmetic mean of \code{?var} over the group.
+    \item \code{GROUP\_CONCAT(?var; separator="...")}: Concatenates the string values of \code{?var} within the group, using an optional separator.
+    \item \code{SAMPLE(?var)}: Returns an arbitrary value of \code{?var} from the group (useful when any representative value suffices).
+\end{itemize}
+
+When using \code{GROUP BY}, variables not appearing in the \code{GROUP BY} clause can only be used in the \code{SELECT} clause if they appear inside an aggregate function. If no \code{GROUP BY} is specified but aggregate functions are present in the \code{SELECT} clause, the entire solution sequence is treated as a single implicit group.
+
+\subsubsection{\code{HAVING} Clause}
+The \code{HAVING} clause is used to filter groups of solutions based on the values of aggregate functions. It is evaluated \emph{after} the \code{GROUP BY} clause and allows to retain only those groups that satisfy a given condition involving aggregates (e.g., \code{HAVING(COUNT(?x) > 5)}). This is different from the \code{FILTER} clause, which operates on individual solutions \emph{before} grouping and cannot reference aggregates.
+
+\subsubsection{\code{FILTER} Clause}
+The \code{FILTER} clause is used inside the \code{WHERE} clause to express conditions that restrict solutions based on computed values, rather than on the RDF graph structure (and hence are not expressible as simple triple patterns). Filters operate on the solution multiset by discarding those solutions for which the filter condition evaluates to \code{false} or raises an error; they cannot introduce new solutions.
+
+A \code{FILTER} applies to all variables introduced in the group graph pattern in which it appears. Its scope is the entire pattern, not just the immediately preceding triple pattern.
+    
+Filters make sense only when applied to variables that have already been bound earlier in the \code{WHERE} clause.
+
+\begin{note}{}
+    The query engine is free to reorder filters (and other operations) for optimization, provided the overall evaluation remains logically equivalent to the original query.
+\end{note}
+
+Filter expressions can include boolean operators (\code{!}, \code{\&\&}, \code{||}), comparisons (\code{=}, \code{!=}, \code{<}, \code{>}, \code{<=}, \code{>=}), arithmetic, and built-in functions such as \code{isIRI()}, \code{isBlank()}, \code{isLiteral()}, \code{bound()}, \code{str()}, \code{lang()}, \code{regex()}, \code{strstarts()}, \code{strends()}, \code{contains()}, and others.
+
+However, many filters and functions only make sense for certain types of terms (e.g., \code{year} can be applied to \code{date}s only).
+When a filter is applied to an incompatible type, an \emph{error} is typically returned. 
+We will later explain how errors are handled in SPARQL.
+
+\subsubsection{\code{UNION}}
+
+The \code{UNION} operator combines the solution multisets produced by two group graph patterns. 
+Given two patterns \(P_1\) and \(P_2\), the expression \code{\{ P1 \} UNION \{ P2 \}} returns every solution that matches \(P_1\) \emph{or} \(P_2\) (or both). 
+The multiplicity of each solution in the result is the \textbf{sum} of its multiplicities in the two input multisets: if a solution appears \(m\) times in the result of \(P_1\) and \(n\) times in the result of \(P_2\), it appears \(m + n\) times in the union.
+
+\code{UNION} can be combined with \code{DISTINCT} to eliminate duplicates, producing a set rather than a multiset. 
+For example:
+\begin{lstlisting}[language=SQL, caption={UNION with DISTINCT}]
+SELECT DISTINCT ?person WHERE {
+  { ?person :hasParent :Alice }
+  UNION
+  { ?person :hasParent :Bob }
+}
+\end{lstlisting}
+This returns each person who has either \code{:Alice} or \code{:Bob} as a parent, without duplicates.
+
+\code{UNION} is processed independently of surrounding patterns, but the combined result must still satisfy any outer patterns and filters.
+
+\subsubsection{\code{MINUS}}
+
+The \code{MINUS} operator computes the set difference between two solution multisets. 
+Given two patterns \(P_1\) and \(P_2\), the expression \code{\{ P1 \} MINUS \{ P2 \}} returns the solutions for \(P_1\) that are not solutions for \(P_2\).
+
+The multiplicity of each retained solution equals its multiplicity in \(P_1\).
+
+\begin{note}{MINUS vs. FILTER NOT EXISTS}
+    Similar results can often be achieved with \code{FILTER NOT EXISTS}, but the two behave differently. For example, consider two GGPs, \code{P1} and \code{P2}, that do \emph{not} share any variables.
+    Now,
+    \begin{itemize}
+        \item \code{\{ P1 \} MINUS \{ P2 \}} contains \emph{all} solutions of \(P_1\).
+        \item \code{FILTER NOT EXISTS \{ P2 \}}: \code{NOT EXISTS} evaluates to \code{false} if \(P_2\) has \emph{at least} a solution, regardless of variable compatibility with \(P_1\). In this case, the filter removes \emph{all} outer solutions.
+    \end{itemize}
+    In general, \code{MINUS} operates on \emph{solution compatibility}, while \code{FILTER NOT EXISTS} checks \emph{pattern existence} in the dataset, taking into account variable substitutions from the outer scope.
+\end{note}
+
+\subsubsection{\code{OPTIONAL}}
+
+The \code{OPTIONAL} operator allows a GGP to be matched \emph{if possible}, without eliminating solutions when the pattern fails. 
+Given two patterns \(P_1\) and \(P_2\), the expression \code{\{ P1 \} OPTIONAL \{ P2 \}} yields a solution \(\mu\) s.t. 
+\begin{itemize}
+    \item \(\mu\) is a solution for \(P_1\)
+    \item if \(\mu\) is not a solution for \(P_2\), the variables that appear only in \(P_2\) are left unbound.
+\end{itemize}
+This is analogous to a \emph{left outer join} in SQL: all results from the mandatory (left) pattern are kept, and optional (right) pattern information is attached where available.
+
+\begin{example}{OPTIONAL Pattern}
+    Retrieve all persons and, if available, their email addresses:
+    \begin{lstlisting}[language=SQL, caption={Using OPTIONAL for missing data}]
+SELECT ?person ?email WHERE {
+?person rdf:type :Person .
+OPTIONAL { ?person :hasEmail ?email }
+}
+    \end{lstlisting}
+    Persons without an email are still returned, with \code{?email} unbound.
+\end{example}
+
+Multiple \code{OPTIONAL} clauses are evaluated sequentially: each optional pattern can use variables bound in mandatory patterns or in preceding optional patterns that successfully matched.
+
+\subsubsection{Subqueries}
+
+Subqueries allow the results of one query to be used as part of another. A subquery is enclosed in curly braces and behaves as a complete \code{SELECT} query within a larger query. 
+It returns a solution multiset, and the outer query operates over these results exactly as it would over triple patterns.
+A subquery is evaluated independently, producing a multiset of solutions over its projected variables.
+
+Order is not preserved from the inner query to the outer query, as solution multisets carry no ordering information, unless \code{ORDER BY} is used, as in standard queries.
+
+Variables projected by the subquery can be used in the outer query. Variables used only internally to the subquery are not visible outside.
+
+\begin{example}{}
+    Find all persons who have authored more than five papers, along with their total count:
+    \begin{lstlisting}[language=SQL, caption={Subquery for pre-aggregation}]
+SELECT ?person ?paperCount WHERE {
+    {
+        SELECT ?person (COUNT(?paper) AS ?paperCount) WHERE {
+        ?person :authored ?paper .
+        }
+        GROUP BY ?person
+    }
+    FILTER(?paperCount > 5)
+}
+    \end{lstlisting}
+    The inner subquery computes the paper count per person, and the outer query filters on that count.
+\end{example}
+
+Instead of running a subquery, which can be costly, it is sometimes possible to inject solution multisets (as a subquery would produce) directly into the query evaluation using \code{VALUES} and \code{BIND}.
+
+\subsubsection{\code{VALUES}}
+The injected solution multiset is \emph{constant} (contains only IRIs and literals). 
+
+\begin{example}{}
+    We want to find all the people who know Alice, who are a composer and who have a child.
+    \begin{lstlisting}[language=SQL]
+SELECT DISTINCT ?sub WHERE {
+VALUES (?predicate ?obj) {
+    (eg:knows eg:Alice)
+    (eg:profession eg:Composer)
+    (eg:hasChild UNDEF)
+}
+?sub ?predicate ?obj
+}
+    \end{lstlisting}
+    Each row provides bindings for the specified variables. The special value \keyword{\code{UNDEF}} leaves a variable unbound for that row, meaning the query engine should treat it as a free variable to be matched against the data.
+\end{example}
+
+\subsubsection{\code{BIND}}
+
+\code{BIND} allows to bind a variable with a constant or \emph{computed} value inside the query evaluation.
+
+\begin{example}{}
+    We want to find the people who have their birth year as their favourite number. 
+    \begin{lstlisting}[language=SQL]
+SELECT DISTINCT ?sub WHERE {
+    ?sub eg:dob ?date .
+    BIND (YEAR(?date) AS ?year)
+    ?sub eg:favourite_number ?year
+}
+BIND (YEAR(?birthDate) AS ?birthYear)
+    \end{lstlisting}
+    This could have been also done with a \code{FILTER} statement, but this way is more direct.
+\end{example}
+
+\begin{note}{}
+    Note that not only is \code{BIND} equivalent to expression assignments with \code{AS} in \code{SELECT} (e.g., \code{SELECT (expr AS ?var)}), but variables bound via \code{BIND} can be used \emph{inside} the group graph pattern as soon as they have been bound---in later triple patterns, filters, or subsequent \code{BIND} expressions within the same scope. 
+    This is a significant advantage when the computed value needs to participate in pattern matching.
+
+    Assignments of \textbf{constants} to variables are better realized with \code{VALUES}, which can be placed before or after other patterns using the variable. Because \code{VALUES} provides a static data table, the query engine can optimize it more aggressively than a \code{BIND} with a constant expression.
+\end{note}
+
+\subsection{Errors in SPARQL}
+
+SPARQL follows a specific error handling philosophy based on the concept of \keyword{Effective Boolean Value} (EBV). 
+Rather than halting query execution on type errors, SPARQL propagates errors through the evaluation process according to defined rules.
+
+\begin{definition}{Effective Boolean Value (EBV)}
+    The \keyword{Effective Boolean Value} of a term is defined as follows:
+    \begin{itemize}
+        \item The EBV of \textbf{true} is \code{true}.
+        \item The EBV of \textbf{false} is \code{false}.
+        \item The EBV of a \textbf{literal} with datatype \code{xsd:boolean} is the corresponding boolean value.
+        \item The EBV of a \textbf{string} literal (\code{xsd:string} or plain literal with no language tag) is \code{false} if the string is empty, and \code{true} otherwise.
+        \item The EBV of a \textbf{numeric} literal is \code{false} if the value is zero or \code{NaN}, and \code{true} otherwise.
+        \item The EBV of \textbf{any other term} (including unbound variables, blank nodes, IRIs, and literals of other datatypes) is a \textbf{type error}.
+    \end{itemize}
+\end{definition}
+
+\subsubsection{Error Propagation}
+Error propagation in SPARQL works as follows:
+\begin{itemize}
+    \item When a filter or function encounters a type error (e.g., applying \code{year()} to a string), it produces an \textbf{error}, not a value.
+    \item In logical expressions, errors are treated according to a \textbf{three-valued logic}:
+    \begin{itemize}
+        \item \code{true AND error} $\to$ \textbf{error}
+        \item \code{false AND error} $\to$ \textbf{false} (short-circuit evaluation: the conjunction cannot become true)
+        \item \code{true OR error} $\to$ \textbf{true} (short-circuit: the disjunction is already true)
+        \item \code{false OR error} $\to$ \textbf{error}
+        \item \code{NOT error} $\to$ \textbf{error}
+    \end{itemize}
+    \item In a \code{FILTER} clause, if the overall filter expression evaluates to \textbf{true}, the solution is kept; if it evaluates to \textbf{false} or \textbf{error}, the solution is \textbf{discarded}. Errors thus behave like \code{false} for filtering purposes, but with different propagation behavior inside compound expressions.
+\end{itemize}
+
+This design ensures that a type error on a single tuple does not abort the entire query: only the offending solution is filtered out, while valid solutions are still returned. 
+This is analogous to how SQL's \code{NULL} propagation works in \code{WHERE} clauses, but with explicit three-valued logic for error handling.
+
+\section{An example of RDF Knowledge Graph: Wikidata}
+Wikidata is Wikipedia's knowledge graph. Its practical applications stem from its role as a central, structured data hub: it provides data for Wikipedia infoboxes across all languages, powers the Google Knowledge Graph, and enables complex cross-domain queries, making it a fundamental resource for research, data integration, and AI systems.
+
+Wikidata can be seen as a:
+\begin{itemize}
+    \item \emph{Document-centric knowledge base}: Data are grouped by pages, where a page represents the subject of triples. Each page contains all statements about that subject, along with its labels, aliases, and site links. This organization makes editing and maintenance straightforward for contributors.
+    \item \emph{Graph-structured knowledge base}: Data can be viewed as a giant, interconnected RDF graph where entities are nodes and properties are edges, enabling expressive queries and knowledge discovery across domains.
+\end{itemize}
+
+\begin{definition}{Wikidata Entity Document}
+    A Wikidata \keyword{entity document} is an object with:
+    \begin{itemize}
+        \item \emph{Entity ID}: a language-independent id (e.g. \code{Q17515} identifies Diego Armando Maradona);
+        \item \emph{Terms header}: a list of language-specific aliases (e.g. \q{El Pibe de Oro} for Italian);
+        \item \emph{Statements}: sourced claims\footnote{A Wikidata claim is a subject-property-value triple.} for several properties that the entity might have, with a rank (normal, preferred, deprecated) to encode their current significance (preferred statements are marked as the most important; deprecated ones are known to be wrong but kept for reference), qualifiers (context information like 
+        \q{excluding non-official matches}), references (one or more sources backing up the claim). For example, \code{Q17515} \(\to\) \q{member of sports team} \(\to\) \q{SSC Napoli};
+        \item \emph{Site links}: Connections to pages on other Wikimedia projects realise entity-level information integration.
+    \end{itemize}
+\end{definition}
+
+\subsection{From Wikidata to RDF}
+Wikidata is internally stored in JSON, which is a document-centric format, and so data has to be converted to RDF to allow SPARQL queries.
+Before converting Wikidata to the RDF format, some discrepancies between the two must be resolved:
+\begin{enumerate}
+    \item Wikidata statements have \keyword{annotations}, property-value pairs that add information to the statement;
+    \item Wikidata property types do not correspond to XML Schema types; 
+    \item Wikidata IDs are not immediately IRIs.
+\end{enumerate}
+However, Wikidata and RDF have some similarities: 
+\begin{enumerate}
+    \item Both are directed labeled graphs;
+    \item All data that appear inside a statement can be subjects/objects in other statements: Wikidata is a hypergraph;
+    \item Statements order does not matter.
+\end{enumerate}
+
+To represent annotations, we reify the overall statement into a standalone entity and then connect it to the annotations by creating a triple for each annotation as object and the overall statement as subject.
+Moreover, the annotation properties with \q{preferred} rank become objects of direct subject-property-object, to allow a more direct navigation for relevant information.
+If no \q{preferred} annotation properties exist, those with \q{normal} rank will take their place, while \q{deprecated} ones cannot.
+
+In general, each Wikidata property turns into several RDF properties, whose types are defined by a \keyword{namespace} mechanism.
+\begin{table}[H]
+    \centering
+    \caption{Wikidata RDF namespaces}
+    \label{tab:wikidata-namespaces}
+    \begin{tabular}{@{}llp{5cm}@{}}
+        \hline
+        \textbf{Prefix} & \textbf{Namespace URI} & \textbf{Example} \\
+        \hline
+        \texttt{wd:} & \texttt{http://www.wikidata.org/entity/} & \texttt{wd:Q17515} (Maradona) \\
+        \texttt{wdt:} & \texttt{http://www.wikidata.org/prop/direct/} & \texttt{wdt:P54} (member of sports team) \\
+        \texttt{p:} & \texttt{http://www.wikidata.org/prop/} & \texttt{p:P54} (statement node) \\
+        \texttt{ps:} & \texttt{http://www.wikidata.org/prop/statement/} & \texttt{ps:P54} (statement value) \\
+        \texttt{pq:} & \texttt{http://www.wikidata.org/prop/qualifier/} & \texttt{pq:P580} (start time qualifier) \\
+        \texttt{pr:} & \texttt{http://www.wikidata.org/prop/reference/} & \texttt{pr:P248} (stated in reference) \\
+        \texttt{wdno:} & \texttt{http://www.wikidata.org/prop/novalue/} & \texttt{wdno:P40} (no children) \\
+        \texttt{wds:} & \texttt{http://www.wikidata.org/entity/statement/} & \texttt{wds:Q17515-...} (statement ID) \\
+        \texttt{wdref:} & \texttt{http://www.wikidata.org/reference/} & \texttt{wdref:...} (reference ID) \\
+        \texttt{wikibase:} & \texttt{http://wikiba.se/ontology\#} & \texttt{wikibase:rank} \\
+        \hline
+    \end{tabular}
+\end{table}
+
+\noindent
+Finally, all IDs, property types, values (and complex values) are transformed into proper IRIs. For example, the entity ID \code{Q17515} becomes the IRI 
+\begin{center}
+    \code{http://www.wikidata.org/entity/Q17515}
+\end{center}
+while the property \code{P54} (member of sports team) becomes the direct property IRI 
+\begin{center}
+    \code{http://www.wikidata.org/prop/direct/P54} 
+\end{center}
+for simple truthy statements, and the statement-level property IRI 
+\begin{center}
+    \code{http://www.wikidata.org/prop/P54} 
+\end{center}
+when reified statements with qualifiers or references are needed.
+
+\subsection{Wikidata SPARQL Query Service (WDQS)}
+The Wikidata Query Service (WDQS) is a public SPARQL endpoint that provides live, low-latency access to Wikidata's RDF data, updated in sync with edits made to Wikidata. It allows users to run complex queries over the entire knowledge graph without any local setup.
+Common ways to access WDQS include:
+\begin{itemize}
+    \item \emph{Web Interface}: The primary access point is the web-based query editor at \url{https://query.wikidata.org/}, which features syntax highlighting, autocompletion, and graphical result visualization tools.
+    \item \emph{SPARQL Endpoint}: Direct programmatic access via HTTP requests to the endpoint \url{https://query.wikidata.org/sparql}, supporting both GET and POST methods for integrating Wikidata queries into applications and scripts.
+    \item \emph{Client Libraries}: Various programming language libraries (such as \texttt{SPARQLWrapper} for Python) provide convenient wrappers around the endpoint, simplifying query execution and result handling in code.
+\end{itemize}
+
+\begin{example}{}
+    Navigate to \url{https://query.wikidata.org/} and type the following SPARQL query to find out all the players who have played with D.~A.~Maradona.
+    \begin{lstlisting}[language=sql]
+PREFIX wd: <http://www.wikidata.org/entity/>
+PREFIX wdt: <http://www.wikidata.org/prop/direct/>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+SELECT DISTINCT ?playerLabel ?clubLabel WHERE {
+ wd:Q17515 wdt:P54 ?club . -- Q17515 is Maradona's id; P54 is the 'member of sports team' property id.
+ ?player wdt:P54 ?club .
+ ?player wdt:P106 wd:Q937857 . -- P106 is the 'occupation' property id; Q937857 is the id of 'association football player'.
+ FILTER(?player != wd:Q17515) -- we filter out Maradona himself
+ ?player rdfs:label ?playerLabel .
+ FILTER(LANG(?playerLabel) = "en")
+ ?club rdfs:label ?clubLabel .
+ FILTER(LANG(?clubLabel) = "en")
+}
+ORDER BY ?clubLabel ?playerLabel
+    \end{lstlisting}
+\end{example}
