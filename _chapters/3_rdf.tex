@@ -739,11 +739,11 @@ Error propagation in SPARQL works as follows:
     \item When a filter or function encounters a type error (e.g., applying \code{year()} to a string), it produces an \textbf{error}, not a value.
     \item In logical expressions, errors are treated according to a \textbf{three-valued logic}:
     \begin{itemize}
-        \item \code{true AND error} $\to$ \textbf{error}
-        \item \code{false AND error} $\to$ \textbf{false} (short-circuit evaluation: the conjunction cannot become true)
-        \item \code{true OR error} $\to$ \textbf{true} (short-circuit: the disjunction is already true)
-        \item \code{false OR error} $\to$ \textbf{error}
-        \item \code{NOT error} $\to$ \textbf{error}
+        \item \code{true AND error} \(\to\) \textbf{error}
+        \item \code{false AND error} \(\to\) \textbf{false} (short-circuit evaluation: the conjunction cannot become true)
+        \item \code{true OR error} \(\to\) \textbf{true} (short-circuit: the disjunction is already true)
+        \item \code{false OR error} \(\to\) \textbf{error}
+        \item \code{NOT error} \(\to\) \textbf{error}
     \end{itemize}
     \item In a \code{FILTER} clause, if the overall filter expression evaluates to \textbf{true}, the solution is kept; if it evaluates to \textbf{false} or \textbf{error}, the solution is \textbf{discarded}. Errors thus behave like \code{false} for filtering purposes, but with different propagation behavior inside compound expressions.
 \end{itemize}
