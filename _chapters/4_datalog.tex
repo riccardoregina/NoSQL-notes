@@ -1,0 +1,222 @@
+\chapter{Datalog: Reasoning on Relational Databases}
+
+Although Datalog is a query language that applies to relational databases and relational databases are traditionally associated with SQL, Datalog is fundamentally \emph{not} SQL. 
+It belongs to the family of logic-based query languages and, as such, shares philosophical ground with rule-based reasoning systems. 
+
+\section{Origins and Motivations}
+
+Datalog emerged in the late 1970s and early 1980s from research on \keyword{deductive databases}, a field that combined relational database theory with logic programming. 
+The key idea behind deductive databases is to extend a traditional relational database with a set of \emph{rules} that allow the system to \emph{deduce} new facts from explicitly stored ones. 
+
+Datalog represents a completely different way of querying a relational database: it is a subset of Prolog, an exponent of the \emph{logic programming paradigm}, and crucially allows recursion, which is not supported by standard SQL.
+
+Consider a database with two tables:
+
+\vspace{0.5cm}
+\begin{minipage}{0.45\textwidth}
+    \centering
+    \textbf{Flight}
+    \begin{tabular}{ccc}
+        \toprule
+        \textit{Origin} & \textit{Destination} & \textit{Airline} \\
+        \midrule
+        LHR & GLA & BA \\
+        LHR & EDI & EZ \\
+        GLA & JFK & BA \\
+        EDI & GLA & EZ \\
+        \bottomrule
+    \end{tabular}
+\end{minipage}
+\hfill
+\begin{minipage}{0.45\textwidth}
+    \centering
+    \textbf{Airport}
+    \begin{tabular}{cc}
+        \toprule
+        \textit{Code} & \textit{City} \\
+        \midrule
+        LHR & London \\
+        GLA & Glasgow \\
+        EDI & Edinburgh \\
+        JFK & New York \\
+        \bottomrule
+    \end{tabular}
+\end{minipage}
+\vspace{0.5cm}
+
+\vspace{3mm}
+Say we want to find which airlines fly direct from London to Glasgow.
+The SQL query would be:
+\begin{lstlisting}[language=sql]
+SELECT F.airline
+FROM Flight AS F,
+     Airport AS A1,
+     Airport AS A2
+WHERE A1.city = 'London'
+AND   A2.city = 'Glasgow'
+AND   A1.code = F.origin
+AND   A2.code = F.destination
+\end{lstlisting}
+while the First-Order Logic (FOL) representation of this query is simply:
+\[
+\exists X,Y,Z:\; \text{airport}(X,\text{London}) \land \text{airport}(Y,\text{Glasgow}) \land \text{flight}(X,Y,Z)
+\]
+Notice how the FOL formula is much more expressive and succinct than the SQL query: it directly captures the \emph{logical structure} of the request without the syntactic overhead of joins, aliases, and variable naming conventions.
+
+Let's consider another query: \q{Is it possible to reach Glasgow from London by taking flights (with any number of connections)?}
+
+Neither FOL nor standard SQL can express such a request for an \emph{arbitrary} graph, because the number of intermediate stops is not known in advance. Datalog, however, can express this with a \emph{recursive rule}:
+\begin{lstlisting}[language=prolog]
+reachable(X,Y) :- flight(X,Y,Z).
+reachable(X,Y) :- flight(X,W,Z), reachable(W,Y).
+
+ans(X,Y) :- reachable(X,Y), 
+            airport(X, 'London'), 
+            airport(Y, 'Glasgow').
+\end{lstlisting}
+
+The first rule states that \(Y\) is reachable from \(X\) if there is a direct flight (base case). The second rule states that \(Y\) is reachable from \(X\) if there is a flight to some intermediate \(W\), and \(Y\) is reachable from \(W\) (recursive case).
+
+Unlike FOL and SQL, Datalog can express the \keyword{transitive closure} of a graph\footnote{In a directed graph \(\langle V,E\rangle\), the transitive closure is the set of all pairs of nodes \((x,y)\) such that there is a path of length \(1\) or more from \(x\) to \(y\).}, which is necessary for reachability, because it extends FOL with the \keyword{least fixed-point operator} (LFP). For example,
+\[
+[\text{LFP}\; R(x,y) = E(x,y) \lor \exists z\, (E(x,z) \land R(z,y))]
+\]
+expresses that \(R\) is the smallest relation such that one can go from \(x\) to \(y\) directly via an edge \(E(x,y)\), or go from \(x\) to some \(z\) via an edge \(E(x,z)\) and then from \(z\) to \(y\) via \(R\), which is exactly the reachability relation.
+
+\section{Syntax and Semantics}
+
+Datalog is a subset of the \emph{Prolog} programming language and, because of this, inherits its syntax. However, Datalog imposes restrictions (e.g., no function symbols) to guarantee termination and efficient evaluation over finite databases.
+
+\subsection{Terminology: Constants, Variables, Terms, Atoms}
+We now present and formally describe the fundamental building blocks of Datalog.
+
+\begin{definition}{Constant}
+    A \keyword{constant} is a specific database value. Constants are written in lowercase or enclosed in single quotes. 
+\end{definition}
+Examples of constants of the previous example database are \code{'London'}, \code{'BA'}, \code{42}.
+Constants serve as the \q{nouns} of the language, denoting known entities, strings, or numbers.
+
+\begin{definition}{Variable}
+    A \keyword{variable} denotes an unknown value to be matched during query evaluation. Variables are written with an initial uppercase letter or underscore.
+\end{definition}
+For example, \code{X}, \code{Origin}, \code{\_x}, and \code{\_} are all syntactically valid variables. The anonymous variable \code{\_} is a special placeholder that matches any value and immediately discards the binding---it is used when the matched value is irrelevant to the rest of the rule and need not be referenced elsewhere.
+
+\begin{definition}{Term}
+    A \keyword{term} is either a \emph{constant} or a \emph{variable}.
+\end{definition}
+Unlike full Prolog, Datalog \emph{does not} allow function symbols (complex terms like \code{f(X, Y)} or \code{[X|Y]}). 
+This restriction ensures that the set of all possible values that can appear in a derivation is exactly the finite set of constants occurring in the database.
+This property is known as the \keyword{finite domain assumption}. 
+Because no new compound terms can be constructed during rule evaluation, the search space remains bounded and termination is guaranteed.
+
+\begin{definition}{Atom}
+    An \keyword{atom} is a predicate symbol applied to a tuple of terms: \(p(t_1, t_2, \dots, t_n)\). Atoms represent \emph{relational tuples}.
+\end{definition}
+For example, the atom \code{flight(X, Y, Z)} asserts that a relationship named \code{flight} holds among the terms \code{X}, \code{Y}, and \code{Z}. The \textbf{arity} (number of arguments) of an atom is fixed by the relation schema: \code{flight} has arity 3, \code{airport} has arity 2.
+
+Atoms are categorized according to whether they refer to stored or derived relations:
+
+\begin{definition}{EDB Atom}
+    An \keyword{Extensional Database Atom} refer to base relations stored explicitly in the database (e.g., \code{flight}, \code{airport}).
+\end{definition}
+
+\begin{definition}{IDB Atom}
+    An \keyword{Intensional Database Atom} refer to derived relations defined by rules (e.g., \code{reachable}, \code{ans}).
+\end{definition}
+
+Intuitively, EDB atoms are ground truths, while IDB atoms must be derived and are latent information inside the database.
+
+\subsection{Rules and Queries}
+
+A Datalog program consists of a set of \keyword{rules} and a \keyword{query}.
+
+\begin{definition}{Datalog Rule}
+    A \keyword{Datalog rule} has the form:
+    \[
+    \text{head} \;\text{\texttt{:-}}\; \text{atom}_1, \text{atom}_2, \dots, \text{atom}_n .
+    \]
+    where the \emph{head} is a single IDB atom (the conclusion being derived) and comma-separated \emph{atoms} (EDB or IDB) are evaluated as in conjuction.
+\end{definition}
+A Datalog rule specifies that if the body holds, then also the head does.
+
+\begin{definition}{Fact}
+    A \keyword{fact} is a rule with an empty body (written simply as \code{head.}) and represents a ground truth.
+\end{definition}
+
+\begin{definition}{Datalog Query}
+    A \keyword{Datalog query} is a special rule where the head is a distinguished predicate (often \code{ans} or \code{query}) containing the variables to be returned. 
+    The answer to the query is the set of all tuples that make the body true.
+\end{definition}
+
+To guarantee that the result of any query is finite and computable, Datalog rules must be \keyword{safe}.
+
+\begin{definition}{Rule Safety}
+    A Datalog rule is \keyword{safe} if \emph{every} variable appearing in the head of the rule also appears in at least one positive (non-negated) body atom. 
+\end{definition}
+Consider the \emph{unsafe} rule \code{ans(X) :- not flight(X,Y,Z)}. This rule may lead to an infinite set of results.
+
+\subsection{Semantics: Immediate Consequence and Least Fixed Point}
+
+The semantics of a Datalog program is defined in terms of the \keyword{immediate consequence operator} \(T_P\), which formalizes the idea of \q{applying all rules once} to a given set of facts.
+
+\begin{definition}{Immediate Consequence Operator}
+    Given a Datalog program \(P\) and a database \(D\) be a database instance (i.e., a set of EDB atoms). 
+    The \keyword{immediate consequence operator} \(T_P(D)\) is the set of all facts that can be derived by applying the rules of \(P\) to \(D\) in a single step. Formally:
+    \[
+    T_P(D) = \{\, \text{head}\sigma \mid (\text{head} \;\text{\texttt{:-}}\; B_1, \dots, B_n) \in P \text{ and } \{B_1\sigma, \dots, B_n\sigma\} \subseteq D \,\}
+    \]
+    where \(\sigma\) is a substitution mapping variables to constants.
+\end{definition}
+
+Starting from the EDB atoms of the database (\(D\)), repeated application of \(T_P\) builds larger and larger sets of facts:
+\[
+T_{P,0}(D) = D, \quad T_{P, i+1}(D) = T_P(T_{P, i}(D))
+\]
+Since Datalog rules are monotonic (adding facts only adds more derivable facts, never removes them) and the domain is finite, this sequence converges after finitely many steps to a \keyword{least fixed point}, denoted \[T_{P,\infty}(D)=\bigcup_{i=0}^{\infty}T_{P,i}(D).\]
+This fixed point is exactly the set of all facts logically entailed by the program and the database: it is the \keyword{minimal model} of the program.
+
+\begin{note}{Least Fixed Point as Minimal Model}
+    A Datalog program \(P\) together with a database \(D\) can be seen as a set of first-order sentences (Horn clauses) that must be satisfied. 
+    A \keyword{model} of \(P \cup D\) is any set of ground atoms \(M\) that:
+    \begin{enumerate}
+        \item Contains all EDB facts from \(D\).
+        \item Satisfies every rule: whenever there exists a substitution \(\sigma\) such that all body atoms \(B_1\sigma, \dots, B_n\sigma\) are in \(M\), then \(\text{head}\sigma\) must also be in \(M\).
+    \end{enumerate}
+
+    There are generally \emph{many} models that satisfy these conditions. For example, one could arbitrarily add to \(M\) additional facts that do not belong to \(D\) (hence the first rule is enforced).
+    Such facts also respect the second rule since facts have no body. 
+
+    However, we are interested in the model that contains \emph{only} the facts that are forced to be true by \(D\) and \(P\), and nothing more. 
+    This model is called the \keyword{minimal model}, which has two interesting properties:
+    \begin{enumerate}
+        \item It is a subset of every other model (hence \q{least}).
+        \item It coincides exactly with the least fixed point \(T_{P,\infty}(D)\) computed by iterating the immediate consequence operator.
+    \end{enumerate}
+\end{note}
+
+Let's see immediate consequence \q{in action} in the following example.
+
+\begin{example}{}
+    Consider the program:
+    \begin{lstlisting}[language=prolog]
+flight(lhr, gla, ba).
+flight(gla, jfk, ba).
+
+reachable(X,Y) :- flight(X,Y,Z).
+reachable(X,Y) :- flight(X,W,Z), reachable(W,Y).
+    \end{lstlisting}
+
+    We start from the initial situation 
+    \[T_{P,0}(D) = D = \set{\text{flight(lhr,gla,ba)},\; \text{flight(gla,jfk,ba)}}\]
+    i.e. the EDB atoms of the database \(D\).
+    Then, applying \(T_P\) another time, we obtain 
+    \[T_{P,1}(D) = T_{P,0} \cup \set{\text{reachable(lhr,gla)},\; \text{reachable(gla,jfk)}}\]
+    since a single application of \(T_P\) adds the facts that can be entailed applying a single rule (computation) step. 
+    Let's apply \(T_P\) again:
+    \[T_{P,2}(D) = T_{P,1}(D) \cup \set{\text{reachable(lhr,jfk)}}\]
+    where \code{reachable(lhr,jfk)} was derived by applying the recursive case of the \code{reachable} rule because we already had \code{flight(lhr,gla,ba)} and \code{reachable(gla,jfk)}.
+    Applying another time \(T_P\), we understand that the fixed point is reached, since we cannot add new facts:
+    \[T_{P,3}(D) = T_{P,2}(D)\]
+
+    The least fixed point contains exactly the direct and indirect reachability pairs.
+\end{example}
