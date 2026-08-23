@@ -241,16 +241,19 @@ BASE thus embraces the notion that consistency can be relaxed to achieve higher 
 
 \begin{note}{Revisiting CAP Theorem}
     The CAP theorem's enduring \q{2 of 3} formulation, while historically useful, obscures more than it clarifies~\cite{brewer2012caprevisited}. 
-    A primary source of confusion lies in the misalignment between CAP properties and the homonymous ACID guarantees. 
-    Within ACID, the 'C' denotes transactional invariants --- such as the preservation of unique keys --- whereas in CAP it refers exclusively to single-copy consistency, a far narrower constraint. 
+    A primary source of confusion lies in the misalignment between CAP and classical homonymous properties.
+    Consistency is in reality \emph{linearisability} (\q{if transaction B started after transaction A, then B must see the system in the same state as it wan on completion of A, or a newer state}). To ensure linearisability, the system needs to make the system appear as having a single copy of the data.
+    Availability is in reality \q{every request received by a non-failing node must result in a non-error response}.
+    Partition Tolerance is in reality \q{the network is asynchronous and may delay or drop messages}.
+    To avoid further confusion, we refer to the first two as CAP-consistency and CAP-availability.
+    Note that the theorem, as it was treated previously, is not altered after this clarification. 
 
-    Beyond this terminological discord, the classic binary interpretation of CAP fundamentally misrepresents its properties. 
-    Consistency, availability, and even partitions themselves are continuous spectra, not boolean toggles. Availability ranges from 0 to 100\%, consistency admits numerous gradations, and the perception of a partition can vary asymmetrically across nodes. 
+    However, it is important to mention that there are systems which are nor CAP-consistent nor CAP-available. For example, suppose that the master is partitioned from the slaves: a slave cannot write --- and so the system is not CAP-available ---, and if the replication is asynchronous stale reads are possible --- the system is not CAP-consistent.
+    PostgreSQL, MongoDB, Oracle are some of these.
+
+    This shows that CAP properties are far too narrow.
+    Moreover, consistency, availability, and even partitions themselves are continuous spectra, not boolean toggles. Availability ranges from 0 to 100\%, consistency admits numerous gradations, and the perception of a partition can vary asymmetrically across nodes. 
     Consequently, the consistency-availability choice is not a monolithic system decision but a granular one, potentially differing by subsystem, operation, or even individual data items or users.
-    
-    This nuanced view realigns the relationship between CAP and the BASE design philosophy. 
-    BASE was explicitly crafted to embody the high-availability end of the spectrum, in direct contrast to ACID's consistency-centric approach. 
-    Soft state and eventual consistency are particularly effective techniques for maintaining availability during partitions, and contemporary large-scale systems pragmatically blend elements from both ACID and BASE rather than committing to a single pole.
     
     Finally, partitions are rare events. 
     This observation inverts the conventional CAP reasoning: rather than permanently forfeiting consistency or availability, systems should operate with full guarantees during normal operation. 
