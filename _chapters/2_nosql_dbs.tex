@@ -233,7 +233,7 @@ Data is distributed across nodes according to this hierarchy, with awareness of 
 \end{definition}
 
 \begin{definition}{Table, Column Family, and Keyspace}
-    A \keyword{table} is a container for rows and corresponds to a \keyword{column family}. If multiple column families exist, the row key contains a pointer to each one of them --- this is why they can be conceptually viewed as tables. A table can be distributed across multiple nodes.
+    A \keyword{table} is a container for rows and corresponds to a \keyword{column family}. If multiple column families exist, the row key contains a pointer to each one of them.
 
     A \keyword{keyspace} is an instance of a Cassandra database and is a container of tables. A keyspace is defined by:
     \begin{itemize}
