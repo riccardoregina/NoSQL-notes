@@ -50,7 +50,7 @@ This structural flexibility is a major advantage over relational databases, allo
 
 \subsection{Modeling Relationships}
 
-Differently from relational databases, the One-to-Many relationship is more nuanced: it is split into three variants, based on the given cardinalities of the two parts~\cite{}.
+Differently from relational databases, the One-to-Many relationship is more nuanced: it is split into three variants, based on the given cardinalities of the two parts~\cite{mongodbschemadesign}.
 
 \begin{itemize}
     \item \textbf{One-to-Few Relationships:} The \q{one} is treated as the primary element, and the \q{many} side entities are \keyword{embedded} as an array within the primary document. For example, a \code{customer} document may embed an array of \code{addresses}. This allows retrieving the customer and all their addresses with a single read. However, one should ponderate the embedding choice based on whether the embedded element should have a separate document. This choice is typically driven by the most frequent queries on the system.
