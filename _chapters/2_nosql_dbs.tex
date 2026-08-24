@@ -50,19 +50,23 @@ This structural flexibility is a major advantage over relational databases, allo
 
 \subsection{Modeling Relationships}
 
-Document databases reduce the need for joins through \keyword{denormalization}, storing related data together within a single document. However, one must avoid excessive denormalization that leads to data duplication and update anomalies.
+Differently from relational databases, the One-to-Many relationship is more nuanced: it is split into three variants, based on the given cardinalities of the two parts~\cite{}.
 
 \begin{itemize}
-    \item \textbf{One-to-Many Relationships:} The \q{one} side is treated as the primary element, and the \q{many} side entities are \keyword{embedded} as an array within the primary document. For example, a \code{customer} document may embed an array of \code{addresses}. This allows retrieving the customer and all their addresses with a single read.
-    
-    \item \textbf{Many-to-Many Relationships:} Two collections are used, and each collection contains \keyword{references} to instances of the other entity. This minimizes data duplication, but referential integrity is not automatically guaranteed by the database --- it must be enforced at the application level. For example, \code{students} and \code{courses} collections each contain arrays of references to the other collection.
+    \item \textbf{One-to-Few Relationships:} The \q{one} is treated as the primary element, and the \q{many} side entities are \keyword{embedded} as an array within the primary document. For example, a \code{customer} document may embed an array of \code{addresses}. This allows retrieving the customer and all their addresses with a single read. However, one should ponderate the embedding choice based on whether the embedded element should have a separate document. This choice is typically driven by the most frequent queries on the system.
+    \item \textbf{One-to-Many Relationships:} Each element of the \q{many} side gets referenced in a list inside the \q{one} side. Each element of the \q{many} side has now its own document. 
+        For example, a \code{Product} may embed an array of \code{ReplacementPart} identifiers. In this way, to retrieve additional information about the the replacement parts of a product, more than just one queries will be needed. 
+        \begin{note}{}
+            If we add a reference identifier of the product to the replacement part document, then this approach can also model Many-to-Many relationships.
+        \end{note}
+    \item \textbf{One-to-Squillions Relationships:} The \q{one} is related to so many \q{many} that the document is very likely to overflow the document size limit (16MB in MongoDB). So, we create a separate collection to contain the \q{many} documents, each of which will reference the \q{one}.
+        For example, in a log-tracking system, a \code{host} produces thousands of \code{log}s per day. We create a collection for the \code{host}s and another one for the \code{log}s, where each \code{log} references its \code{host}.
+    \item \textbf{Many-to-Many Relationships:} Two collections are used, and each collection contains \keyword{references} to instances of the other entity (Two-Way referencing). This minimizes data duplication, but referential integrity is not automatically guaranteed by the database --- it must be enforced at the application level. For example, \code{students} and \code{courses} collections each contain arrays of references to the other collection.
 \end{itemize}
 
 \subsection{Managing Hierarchies}
 
 To represent hierarchical structures (e.g., a hierarchy of product categories in an e-commerce platform), multiple modeling approaches are available. The choice depends on whether read or write operations dominate, and on the hierarchy's depth and mutability.
-
-\begin{example}{Product Category Hierarchy}
     Consider an e-commerce product hierarchy where categories can have subcategories, forming a tree structure: \code{Electronics $\to$ Computers $\to$ Laptops}. The following approaches can model this:
 
     \begin{enumerate}
@@ -70,7 +74,51 @@ To represent hierarchical structures (e.g., a hierarchy of product categories in
         \item \textbf{Children References:} Each node stores an array of references to its immediate children. This facilitates retrieving a node's direct children but makes finding all ancestors difficult.
         \item \textbf{Listing All Ancestors (Materialized Path):} Each node stores an array containing references to \emph{all} of its ancestors, from the root down to the immediate parent. This allows fast hierarchy navigation (retrieving all ancestors in a single read) and efficient subtree queries, at the cost of additional write overhead when the hierarchy is restructured.
     \end{enumerate}
+
+\subsection{Denormalization}
+We have talked about the different possibilities regarding relationships and hierarchies. Now, it's the time to explain the peculiar characteristic of document databases: \keyword{denormalization}.
+Denormalization is the technique of adding redundancy to the data scheme, with the goal of making the queries more efficient. It is the inverse operation of normalization, which is a typical feature of relational databases.
+Denormalization is driven by the cardinality of the entities and the frequency of the queries that the system must handle.
+Let's consider an example.
+
+\begin{example}{}
+    An information system must manage data related to weather stations and their measurements.
+    Each station makes millions of measurements over time, which makes it impossible to store a list of measurements in the document related to the station.
+    Each station has a name, an installation city, an altitude, and an installation date (e.g., station \q{MI01} is located in Milan, at an altitude of 120 meters, and was installed in 2010).
+    Each measurement has a timestamp, a temperature, and a humidity level.
+
+    It is expected that the most frequent operations will be the following:
+    \begin{description}
+        \item[Q1]: Given a day, show all the measurements taken;
+        \item[Q2]: Given the identifier of a station, show its last 100 measurements;
+        \item[W1]: Insertion of a new measurement for a station.
+    \end{description}
+
+    Given the premises, we find ourselves in a One-to-Squillions relationship between a station and its measurements.
+    Therefore, it is necessary to have two collections: Stations, Measurements.
+    Having a separate collection for measurements allows query Q1 to be more efficient compared to a schema in which the measurements are embedded in the hosts that produce them.
+
+    Query Q2 suggests a denormalization that would greatly improve its performance: we embed the last 100 measurements of a host within that host's document, in a list.
+    With each new measurement, the oldest measurement will be discarded from this list and the new one will be added. The insertion of a new measurement (operation W1) therefore involves both the creation of a new document in the Measurements collection and the update of a list in a host document within the Hosts collection.
+
+    Let us analyze the cost of the described denormalization: suppose there are 21 stations and that each of them produces 1 measurement per second. In this way, the daily frequency for operation W1 would be \(86400 \cdot 21 \approx 2000000\).
+    Suppose also that queries Q1 and Q2 have a daily frequency of \(500000\) and \(1000000\), respectively.
+
+    Let us calculate the cost of the three most frequent operations to understand whether denormalization is beneficial on a daily basis:
+    \begin{description}
+        \item[Q1]: It is sufficient to keep track of the first measurement of the day to obtain an efficient query. Let us roughly assume that the read cost is just one access.\footnote{This assumes that the Measurements collection follows an append-only policy, where documents are stored in insertion order. If a reference to the first measurement of each day is maintained, Q1 can locate the starting point with a single access and then stream the bulk of the day's measurements without scanning the entire collection. The cost of streaming the results is omitted here, as it is identical in both the denormalized and non-denormalized schemas and therefore does not affect the comparison.} 
+            Therefore, \(2000000\) (two million) accesses per day.
+        \item[Q2]: With the described denormalization, this query has the cost of a single access, therefore \(1000000\) (one million) accesses per day. Without denormalization, the cost is \(100\) accesses to the Measurements collection, which is a generous underestimate since it would be necessary to scan the Measurements collection. Therefore, the daily cost without denormalization is \(100000000\) (one hundred million) accesses.
+        \item[W1]: Without denormalization, the cost of inserting a measurement is \(1\) write (we assume that the collection inserts documents in append mode), so the daily cost is \(20000000\) (twenty million) writes. With denormalization, to insert a measurement, a write to the Measurements collection, an access to the Stations collection, and a write to the station document are required. The daily cost is therefore \(2\cdot 20000000 = 40000000\) (forty million) writes and \(20000000\) (twenty million) accesses.
+    \end{description}
+    Therefore, without denormalization, we get \(2000000 + 100000000 = 102000000\) (one hundred two million) accesses and \(20000000\) (twenty million) writes. With denormalization, we get \(2000000 + 1000000 + 20000000 = 23000000\) (twenty-three million) accesses and \(40000000\) (forty million) writes.
+    Let us not be fooled by the numbers: a write costs about as much as ten reads. Assuming this, without denormalization we get \(302000000\) (three hundred two million) reads, while with denormalization we get \(423000000\) (four hundred twenty-three) reads.
+    According to this cost model, denormalization is not advantageous.
 \end{example}
+
+The example shows that making the choice of denormalization depends on the specific system and must be based upon deep analysis.
+In general, denormalization is convenient of read-heavy systems and inconvenient on write-heavy systems.
+But be careful: read- and write-heavy are not boolean, they are a continuous spectrum.
 
 \section{Column Databases}
 
