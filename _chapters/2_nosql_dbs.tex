@@ -30,6 +30,79 @@ Several design patterns are commonly used when modeling data with key-value data
     \item \textbf{Indexes:} To enable querying by non-key attributes, secondary indexes (maintained manually or provided by the database) can be built, mapping attribute values to sets of primary keys.
 \end{itemize}
 
+\begin{example}{}
+We want to represent a key-value database for vehicle rentals.
+Each booking has the following attributes: id, vehicle type (car or van), booking start date, booking end date, customer name, customer id.
+
+The critical operations (to be executed most frequently) are:
+\begin{enumerate}
+    \item Retrieve all bookings for a given start date.
+    \item Retrieve the booking given the booking ID.
+    \item Update the end date of a booking given the ID.
+    \item Delete a booking given the ID.
+\end{enumerate}
+
+\vspace{2mm}
+\textbf{Option 1: Simulating a table}.
+
+\begin{verbatim}
+rent:id:type = <"Car" | "Van">
+rent:id:s_date = <date>
+rent:id:e_date = <date>
+rent:id:cust = { name: <name>, id: <id> }
+\end{verbatim}
+
+The first operation is very inefficient: there is no index on \texttt{s\_date}, so a full scan over all bookings would be required.
+The second operation is somewhat slow but acceptable: using the id, all attributes can be accessed, but not atomically.
+The third operation is instantaneous.
+The fourth operation is somewhat slow for the same reasons as the second.
+
+\vspace{2mm}
+\textbf{Option 2}.
+
+\begin{verbatim}
+rent:id = { 
+    type: <type>, 
+    s_date: <data>, 
+    e_date: <data>, 
+    cust: { 
+        name: <name>, 
+        id: <id> 
+    } 
+}
+
+rent:s_date = [ id_rent1, id_rent2, ... ]
+\end{verbatim}
+
+The first operation is instantaneous thanks to the index on \texttt{s\_date}.
+The second operation is instantaneous thanks to \texttt{rent:id}.
+The third operation is very efficient, as in the second case.
+The fourth operation requires deleting the booking from both the first and second namespaces. Therefore, a lookup on \texttt{rent:id} and one on \texttt{rent:s\_date} are both needed, and both are fast.
+
+\vspace{2mm}
+\textbf{Option 3}
+
+\begin{verbatim}
+rent:s_date:id = { 
+    type: <type>, 
+    e_date: <date>, 
+    cust: { 
+        name: <name>, 
+        id: <id> 
+    } 
+}
+\end{verbatim}
+
+The first operation is instantaneous.
+The second operation is extremely inefficient: a linear scan must be performed.
+The third operation is likewise inefficient.
+The fourth operation is likewise inefficient.
+
+\vspace{2mm}
+\noindent
+So, option 2 is the best choice.
+\end{example}
+
 \section{Document Databases}
 
 Document databases store data as \keyword{documents}, which are self-contained, hierarchical data structures (typically JSON, BSON, or XML).
