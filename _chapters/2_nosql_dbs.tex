@@ -328,7 +328,7 @@ The following design guidelines should be observed when working with column data
 Graph databases are designed to store and query entities and their relationships directly as nodes and edges. Several types of graph databases exist, each suited to specific use cases:
 
 \begin{itemize}
-    \item \textbf{Online vs. Offline graph databases:} Online graph databases support real-time, transactional querying and updates (OLTP), while offline graph databases are optimized for batch processing and analytical workloads (OLAP) over large, static graphs.
+    \item \textbf{Online vs. Offline graph databases:} Online graph databases support real-time, transactional querying and updates (OLTP, On-Line Transaction Processing), while offline graph databases are optimized for batch processing and analytical workloads (OLAP, On-Line Analytical Processing) over large, static graphs.
     \item \textbf{Native vs. Non-native graph databases:} A \keyword{native graph database} stores and manages data using a graph model at the storage layer (index-free adjacency). A \keyword{non-native graph database} uses an underlying non-graph storage engine (e.g., relational tables) and layers a graph API on top. A DBMS that exposes graph CRUD methods can be considered a graph DBMS regardless of its internal storage engine.
 \end{itemize}
 
@@ -419,9 +419,8 @@ Queries are syntactically not nested, but \textbf{chained}: each clause consumes
     \end{itemize}
 \end{definition}
 
-\begin{warning}{Quoting Rules in Cypher}
+\noindent
 Variable names, labels, and property keys are quoted with backticks (\code{`}), which can be omitted if only alphanumeric characters and underscores are used. Property values, if strings, use straight single quotes (\code{'}) or double quotes (\code{"}).
-\end{warning}
 
 \begin{example}{Detailed Node Pattern}
     The following node pattern matches a node labeled \code{Person} and \code{Student}, with specific property constraints, bound to the variable \code{s}:
@@ -430,7 +429,7 @@ Variable names, labels, and property keys are quoted with backticks (\code{`}), 
     \end{center}
 \end{example}
 
-\begin{definition}{Path pattern and relationship pattern}
+\begin{definition}{Path Pattern and Relationship Pattern}
     A \keyword{path pattern} is a sequence of one or more node patterns separated by relationship expressions. A path can have three directions:
     \begin{itemize}
         \item \textbf{Forward:} \code{()-[...]->()}
@@ -449,18 +448,65 @@ Variable names, labels, and property keys are quoted with backticks (\code{`}), 
 \end{definition}
 
 \begin{warning}{}
-The range literal always applies to the whole relationship pattern. The \code{|}-separated list of relationship types is a \textbf{disjunction}: at least one of the listed types must match (in Neo4j, a relationship can only have one type). Similarly, the comma-separated list of properties inside curly braces is a \textbf{disjunction}: the matched relationship must have \emph{at least} the specified properties.
+    The range literal always applies to the whole relationship pattern. The \code{|}-separated list of relationship types is a \textbf{disjunction}: at least one of the listed types must match (in Neo4j, a relationship can only have one type). 
+    In contrast, the comma-separated list of properties inside curly braces is a \textbf{conjuction}: the matched relationship must have \emph{all} of the specified properties.
 \end{warning}
 
 \begin{example}{Path Pattern with Range}
-The path pattern \code{(a)-[:KNOWS*1..10]->(b)} matches all paths that link two nodes with at least one and at most ten consecutive \code{KNOWS} relationships (friendship chains up to depth 10).
+    The path pattern \code{(a)-[:FRIEND*1..3]->(b)} matches all paths that link two nodes with at least one and at most three consecutive \code{FRIEND} relationships: a path with three \code{FRIEND} relationships means that \code{(b)} is a friend of a friend of a friend of \code{(a)}.
 \end{example}
 
+Once nodes and relationships have been matched, their information can be accessed using the following functions and syntax:
 
+\begin{itemize}
+    \item Property access: \code{matched.propertyKey} or \code{matched[expression]}, where \code{expression} evaluates to a property key string;
+    \item \code{id(matched)}: Returns the numeric internal identifier of a node or relationship. Identity is determined by this ID, not by properties;
+    \item \code{keys(matched)}: Returns the list of all property keys of a node or relationship;
+    \item \code{labels(node)}: Returns the list of labels assigned to a node;
+    \item \code{type(relationship)}: Returns the type (name) of a relationship as a string.
+\end{itemize}
+
+\noindent
+A matched path (alternating sequence of nodes and relationships) can be assigned to a variable: 
+\begin{lstlisting}
+MATCH path = <path_pattern> 
+\end{lstlisting}
+This is useful to extract the path informations with the following functions:
+
+\begin{itemize}
+    \item \code{relationships(path)}: Returns the list of relationships in the path.
+    \item \code{nodes(path)}: Returns the list of nodes in the path.
+    \item \code{length(path)}: Returns the number of relationships in the path.
+\end{itemize}
+
+\noindent
+Since we mentioned lists, we now explain how to manipulate them.
+To modify the elements of a list, list comprehension is used:
+\begin{lstlisting}
+<list_compr> ::= \[<item> IN <list> [WHERE <predicate>][| <map_expr>]\]
+\end{lstlisting}
+where \texttt{predicate} is a whatever boolean condition applied to the \texttt{item} and \texttt{map\_expr} is the expression to which the \texttt{item} will be mapped.
+
+Elements of a list can be transformed to result rows by means of the \texttt{UNWIND} operator:   
+\begin{lstlisting}
+UNWIND <list | list_compr> AS <name>
+\end{lstlisting}
+
+\begin{example}{}
+    For example, the following Cypher query returns all the friends of friends that connect two people.
+    \begin{lstlisting}
+MATCH path = (a)-[:FRIEND*]-(b)
+UNWIND [node in nodes(path) | node.name] AS friend
+RETURN friend
+    \end{lstlisting}
+\end{example}
+
+\noindent
 \begin{definition}{Graph pattern}
     A \keyword{graph pattern} is a comma-separated list of path patterns, interpreted in \textbf{conjunction}: all specified path patterns must be satisfied simultaneously for a match to occur.
 \end{definition}
 
+\noindent
 In a graph pattern match:
 \begin{itemize}
     \item Every node pattern is mapped to a node.
@@ -469,19 +515,113 @@ In a graph pattern match:
     \item Parts of the pattern that have no associated variable must also be matched (they contribute to the matching conditions but are not bound to variables for later use).
 \end{itemize}
 
-\begin{warning}{Edge Uniqueness and Path Multiplicity}
-    In any single match of a graph pattern:
-    \begin{itemize}
-        \item Each \textbf{relationship} must be used in only one place within the pattern (\keyword{unique edges} feature). This means an edge cannot appear twice in the same pattern match.
-        \item Each \textbf{node} can be used multiple times within the same pattern.
-        \item When paths are matched, each distinct path (without repeated relationships) counts as one result (\keyword{path multiplicity} feature).\footnote{This means that even if there are multiple ways to walk the same set of edges (by reordering intermediate nodes that are visited via different routes), a path is defined by its sequence of relationships. Two paths that use the \emph{same} relationships in the \emph{same} order are considered identical, yielding a single match. Two paths that use different relationships (or the same relationships in a different order) are distinct matches, each yielding a separate result.}
-        \item To use the same edge multiple times, one must use several separate \code{MATCH} clauses.
-    \end{itemize}
-\end{warning}
+\noindent
+In a graph pattern match, each \textbf{relationship} (edge) must be used only once (\keyword{unique edges} feature). 
+Each distinct path (without repeated relationships) counts as one result (\keyword{path multiplicity} feature).\footnote{This means that even if there are multiple ways to walk the same set of edges (by reordering intermediate nodes that are visited via different routes), a path is defined by its sequence of relationships. Two paths that use the \emph{same} relationships in the \emph{same} order are considered identical, yielding a single match. Two paths that use different relationships (or the same relationships in a different order) are distinct matches, each yielding a separate result.}
 
-Graph pattern matching in Cypher is based on \textbf{relationship isomorphism}: relationships are matched injectively (no edge is reused within a single pattern), while nodes may be reused. This differs from pure homomorphism-based matching used in some other query languages (e.g., SPARQL), where both nodes and edges can be reused arbitrarily. The edge-isomorphism semantics prevent trivial, semantically redundant matches that would arise from re-walking the same edge.
+\begin{example}{}
+    The following graph represents companies and which company sells to other ones.
+    \begin{center}
+    \begin{tikzpicture}[
+        node distance=1.5cm,
+        % Node styles
+        concept/.style={circle, draw, minimum size=0.6cm, align=center, fill=red!10},
+        property/.style={rectangle, draw, minimum size=0.8cm, align=center, fill=blue!10},
+        % Edge styles
+        relation/.style={-{Stealth[length=2mm]}, thick},
+        propedge/.style={dotted, thick}
+    ]
+        % Nodes
+        \node[concept] (a) at (0,0) {a};
+        \node[concept, below left=1.5cm and 0.5cm of a] (b) {b};
+        \node[concept, below right=1.5cm and 0.5cm of b] (c) {c};
+        \node[concept, right=2.5cm of c] (d) {d};
 
-% Make an example of a prevented, trivial match.
+        % Properties
+        \node[property, right=0.2cm of a] (aprop) {name: 'Tubotec'};
+        \node[property, right=0.2cm of b] (bprop) {name: 'Martelli'};
+        \node[property, left=0.2cm of c] (cprop) {name: 'Burago'};
+        \node[property, right=0.2cm of d] (dprop) {name: 'Pirolli'};
+
+        % Relationships
+        \draw[relation] (a) -- node[left] {:SELLS\_TO} (b);
+        \draw[relation] (b) -- node[left] {:SELLS\_TO} (c);
+        \draw[relation] (c) -- node[right] {:SELLS\_TO} (b);
+        \draw[relation] (c) -- node[below] {:SELLS\_TO} (d);
+
+        % Property connection
+        \draw[propedge] (a) -- (aprop);
+        \draw[propedge] (b) -- (bprop);
+        \draw[propedge] (c) -- (cprop);
+        \draw[propedge] (d) -- (dprop);
+
+    \end{tikzpicture}
+    \end{center}
+
+    We want to find two companies which are connected with a path of four \texttt{:SELLS\_TO} relationships.
+    The Cypher query is:
+    \begin{lstlisting}
+MATCH (x)-[:SELLS_TO*4]->(y)
+RETURN x.name, y.name
+    \end{lstlisting}
+    However, it will not yield any result due to the unique edge feature.
+    In fact, such a path of length 4 exists (\texttt{a->b->c->b->c}), but it requires the edge from \texttt{b} to \texttt{c} to be traversed twice.
+
+    While if we want to find all such paths but of length 3, the related query would yield the following results:
+    \begin{lstlisting}
+x.name   |  y.name
+--------- ----------
+'Tubotec' 'Pirolli'
+'Tubotec' 'Martelli'
+    \end{lstlisting}
+    for the distinct paths \texttt{a, b, c} and \texttt{a, b, d}, respectively.
+\end{example}
+
+\noindent
+To use the same \textbf{relationship} multiple times, one must use several separate \code{MATCH} clauses, namely separate graph patterns.
+
+\begin{example}{}
+    Consider the graph of the previous example.
+    If we want to reuse that edge from \texttt{b} to \texttt{c}, we can use add a separate \code{MATCH} clause:
+    \begin{lstlisting}
+MATCH (x)-[:SELLS_TO*3]->(y)
+MATCH (y)-[:SELLS_TO]->(z)
+RETURN x.name, y.name, z.name
+    \end{lstlisting}
+    The first \code{MATCH} clause will match with the distinct paths \texttt{a->b->c->b} and \texttt{a->b->c->d}.
+    The second \code{MATCH} clause, for each of the previously matched paths, will reuse the bound \code{y} variable --- which is \code{b} for the first matched path and \code{d} for the second one --- and match companies that \code{y} sells to.
+    For the first previous match, the path \texttt{b->c} will be matched --- we have legally reused the edge! --- while no match will be found for the second previous match since \code{d} has no outgoing edges.
+    So, the Cypher query yields a single result:
+    \begin{lstlisting}
+ x.name  |  y.name  | z.name
+--------- ---------- --------
+'Tubotec' 'Martelli' 'Burago'
+    \end{lstlisting}
+\end{example}
+
+\noindent
+In a graph pattern match, each \textbf{node} can be used multiple times within the same graph pattern.
+
+\begin{example}{}
+    Consider the previous graph from the example.
+    We want to find all the companies that Tubotec sells to via Burago. We can use two comma-separated path pattern to express this (but it can be expressed also with a single path pattern):
+    \begin{lstlisting}
+MATCH ({name: 'Tubotec'})-[:SELLS_TO*]->(x {name: 'Burago'}),
+      (x)-[:SELLS_TO]->(y)
+RETURN y.name
+    \end{lstlisting}
+    This query will yield two results:
+    \begin{lstlisting}
+  y.name
+----------
+'Martelli'
+'Pirolli'
+    \end{lstlisting}
+\end{example}
+
+\begin{note}{}
+    Graph pattern matching in Cypher is based on \emph{relationship isomorphism}: relationships are matched injectively (no edge is reused within a single pattern), while nodes may be reused. This differs from pure homomorphism-based matching used in some other query languages (e.g., SPARQL), where both nodes and edges can be reused arbitrarily. The edge-isomorphism semantics prevent trivial, semantically redundant matches that would arise from re-walking the same edge.
+\end{note}
 
 \subsubsection{Path Quantifiers}
 
@@ -503,70 +643,162 @@ In addition to the range literal syntax for varying-length paths (e.g., \code{[:
     \end{itemize}
 \end{definition}
 
-\begin{note}{Relation to Range Literals}
-    Path quantifiers are a generalization of the range literal in a relationship pattern. A simple range literal like \code{[:KNOWS*1..5]} is equivalent to the quantified path pattern \code{((:KNOWS))\{1,5\}}. However, path quantifiers can enclose arbitrarily complex subpatterns involving multiple nodes and relationships, making them strictly more expressive than plain range literals.
-\end{note}
+Path quantifiers are a generalization of the range literal in a relationship pattern. A simple path pattern \code{()-[:KNOWS*1..5]-()} is equivalent to the quantified path pattern \code{(()-[:KNOWS]-())\{1,5\}}. However, path quantifiers can enclose arbitrarily complex subpatterns involving multiple nodes and relationships, making them strictly more expressive than plain range literals.
 
 Variables declared within a quantified path pattern are \keyword{group variables}. Rather than binding to a single node or relationship, they bind to lists of all the nodes or relationships they matched across the repetitions of the subpattern.
 
-\begin{example}{Alternative Route Detection with Path Quantifiers}
-    Consider a transportation network where we want to find all possible routes between two cities that involve at least one and at most three intermediate stops, and collect the cities visited along the way:
+\begin{example}{}
+    Path patterns can contain a \texttt{WHERE} clause. We can leverage this feature to show that path quantifiers are more expressive that range literals.
+    Consider the following graph representing some of the places in Naples and their air distance:
+\begin{center}
+\begin{tikzpicture}[
+    node distance=1.5cm,
+    % Node styles
+    concept/.style={circle, draw, minimum size=0.6cm, align=center, fill=red!10},
+    property/.style={rectangle, draw, minimum size=0.8cm, align=center, fill=blue!10},
+    % Edge styles
+    relation/.style={-{Stealth[length=2mm]}, thick},
+    propedge/.style={dotted, thick}
+]
+    % Nodes
+    \node[concept] (a) at (0,0) {a};
+    \node[concept, below right=0.3cm and 7.0cm of a] (b) {b};
+    \node[concept, below right=1.5cm and 0.5cm of a] (c) {c};
+    \node[concept, above right=0.2cm and 2.5cm of c] (d) {d};
 
-    \begin{lstlisting}[language=SQL, caption={Collecting intermediate stops with group variables}]
-MATCH (origin:City {name: 'Rome'})
-MATCH (dest:City {name: 'Berlin'})
-MATCH path = (origin)
-             -[(:ROAD|:RAIL|:FLIGHT)->(stop:City)]{1,3}
-             ->(dest)
-RETURN origin.name,
-       [s IN stop | s.name] AS intermediateStops,
-       length(path) AS totalHops
+    % Properties
+    \node[property, above=0.2cm of a] (aprop) {name: 'Piazza Amedeo'};
+    \node[property, above=0.2cm of b] (bprop) {name: 'Piazza del Plebiscito'};
+    \node[property, below left=0.2cm and 0.5cm of c] (cprop) {name: 'Piazza San Pasquale'};
+    \node[property, below=0.5cm of d] (dprop) {name: 'Piazza dei Martiri'};
+
+    % Relationships
+    \draw[relation] (a) -- node[above] {:NEXT} (b);
+    \draw[relation] (a) -- node[left] {:NEXT} (c);
+    \draw[relation] (c) -- node[below] {:NEXT} (d);
+    \draw[relation] (d) -- node[below] {:NEXT} (b);
+
+    % Property connection
+    \draw[propedge] (a) -- (aprop);
+    \draw[propedge] (b) -- (bprop);
+    \draw[propedge] (c) -- (cprop);
+    \draw[propedge] (d) -- (dprop);
+
+\end{tikzpicture}
+\end{center}
+
+    We want to find a path from Piazza Amedeo to Piazza del Plebiscito such that there is less than a km between a place and another, so that we can stop at some bar for a fresh drink of water. We want to know the intermediate stops, of course.
+    We can elegantly express this with the following Cypher query:
+    \begin{lstlisting}
+    MATCH (x {name: 'Piazza Amedeo'}),
+          (x) (()-[r:NEXT]->(s) WHERE r.distance <= 1) (y),
+          (y {name: 'Piazza del Plebiscito'})
+    UNWIND s AS stop
+    RETURN stop.name
     \end{lstlisting}
-    
-    Here \code{stop} is a group variable collecting all intermediate \code{City} nodes visited along the quantified path segment. The pattern uses a disjunction of relationship types (\code{:ROAD|RAIL|FLIGHT}) inside the quantified subpattern, allowing mixed-mode transportation chains.
+    where we have used the \texttt{UNWIND} operator to transform each element of the \code{s} list in a row named \texttt{stop}.
+    We will talk about it.
+
+    The output of the query is:
+    \begin{lstlisting}
+        stop
+---------------------
+'Piazza San Pasquale'
+'Piazza dei Martiri'
+    \end{lstlisting}
 \end{example}
 
-\subsubsection{Accessing Matched Nodes and Relationships}
+\subsubsection{The \texttt{WITH} Clause}
+The \texttt{WITH} clause is used for intermediate projection, aggregation and aliasing. In contrast with the \texttt{WHERE} clause, whose role is to exclude rows from the result, the \texttt{WITH} clause manipulates data for subsequent queries.
 
-Once nodes and relationships have been matched, their information can be accessed using the following functions and syntax:
+\begin{example}{}
+    Consider the following graph representing teams, their twinnings and their supporters:
+    \begin{center}
+    \begin{tikzpicture}[
+        node distance=1.5cm,
+        % Node styles
+        concept/.style={circle, draw, minimum size=0.6cm, align=center, fill=red!10},
+        property/.style={rectangle, draw, minimum size=0.8cm, align=center, fill=blue!10},
+        % Edge styles
+        relation/.style={-{Stealth[length=2mm]}, thick},
+        propedge/.style={dotted, thick}
+    ]
+        % Nodes
+        \node[concept] (t1) at (0,0) {t1};
+        \node[concept, right=4cm of t1] (t2) {t2};
+        \node[concept, below right=3cm and 1.8cm of a] (t3) {t3};
 
+        \node[concept, below left=2cm and 2cm of t1] (s1) {s1};
+        \node[concept, left=3cm of t1] (s2) {s2};
+        \node[concept, above=2cm of t1] (s3) {s3};
+
+        \node[concept, above right=1cm and 1cm of t2] (s4) {s4};
+
+        % Relationships
+        \draw[relation] (t1) -- node[below] {:TWINNED} (t2);
+
+        \draw[relation] (s1) -- node[right] {:SUPPORTS} (t1);
+        \draw[relation] (s2) -- node[above] {:SUPPORTS} (t1);
+        \draw[relation] (s3) -- node[right] {:SUPPORTS} (t1);
+
+        \draw[relation] (s4) -- node[right] {:SUPPORTS} (t2);
+    \end{tikzpicture}
+    \end{center}
+    We want to find the names of the ones that support a team with at least two supporters.
+    \begin{lstlisting}
+MATCH (t)<-[:SUPPORTS]-(s)
+WITH t, count(s) AS supporters
+WHERE supporters >= 2
+MATCH (s)-[:SUPPORTS]->(t)
+RETURN s.name AS supporter, t.name AS team
+    \end{lstlisting}
+\end{example}
+
+\noindent
+In this clause, we can also apply reductions --- \code{count}, \code{sum}, \code{avg}, \code{min}, \code{max}, \code{stDev}, \code{percentileDisc}, etc. ---, aliasing via the \texttt{AS} binary operator (as shown in the previous example), and a special form of aggregation with the \texttt{collect} function, that gathers rows into a list.
+
+\begin{note}{Implicit Grouping}
+    When a \code{WITH} or \code{RETURN} clause contains both aggregate and non-aggregate expressions, the non-aggregate expressions serve as implicit grouping keys.
+    For example, in the previous example, at the point of the \texttt{WITH} clause, rows are grouped by the team node \texttt{t}.
+\end{note}
+
+\subsubsection{The \texttt{WHERE} Clause}
+
+The \texttt{WHERE} clause determines which matched patterns are retained. A \code{WHERE} clause contains a boolean expression, which can be arbitrarily complex, i.e. made by connecting and nesting several \emph{basic expressions}. 
+Basic expressions are: 
 \begin{itemize}
-    \item Property access: \code{matched.propertyKey} or \code{matched[expression]}, where \code{expression} evaluates to a property key string.
-    \item \code{id(matched)}: Returns the numeric internal identifier of a node or relationship. Identity is determined by this ID, not by properties.
-    \item \code{keys(matched)}: Returns the list of all property keys of a node or relationship.
-    \item \code{labels(node)}: Returns the list of labels assigned to a node.
-    \item \code{type(relationship)}: Returns the type (name) of a relationship as a string.
+    \item checks over properties and variables of the form \texttt{<var|property> <binary\_operator> <expr>} or \texttt{<var|property> <unary\_operator>}. The binary operators \texttt{=, <>} can be used with all kinds of variables and properties.
+        \begin{example}{Checking Identity}
+            Find two distinct people s.t. the first knows a computer scientist and the second is married with them.
+            \begin{lstlisting}
+MATCH (a)-[:KNOWS]-(x{occupation: 'Computer Scientist'}),
+      (b)-[:SPOUSE]-(x)
+WHERE a <> b
+RETURN a, b, x
+            \end{lstlisting}
+            In Cypher, \texttt{a <> b} checks the node identity. To check the property equality, one has to compare all the nodes properties.
+        \end{example}
+        The unary operators \texttt{IS NULL} and \texttt{IS NOT NULL} are available for all kinds of variables and properties too.
+        For strings, \texttt{STARTS WITH}, \texttt{ENDS WITH}, \texttt{CONTAINS} can be used, as well as to \texttt{=\~} match against regular expressions.
+        For lists, there are specific functions that apply to list comprehension: 
+        \begin{itemize}
+            \item The function \texttt{all} returns true when the list comprehension predicate is true for \emph{all} the elements of the \texttt{list}. For example, \texttt{all(person IN nodes(path) WHERE person.age > 18)} evaluates to \texttt{true} if \texttt{n.age > 18} is true for every item.
+            \item The function \texttt{any} returns true when the predicate is true for \emph{any} of the elements of the \texttt{list}.
+            \item The function \texttt{none} returns true when the predicate is true for \emph{none} of the elements of the \texttt{list}.
+            \item The function \texttt{single} returns true when the predicate is true only for a \emph{single} element of the \texttt{list}.
+        \end{itemize}
+    \item path patterns.
+        \begin{example}{}
+            Find the people who know a computer scientist and who are not married.
+            \begin{lstlisting}
+MATCH (a)-[:KNOWS]-({occupation: 'Computer Scientist'}),
+WHERE NOT (a)-[:SPOUSE]-()
+RETURN a
+            \end{lstlisting}
+            Without the \texttt{WHERE} clause, the query would match also married people.
+        \end{example}
 \end{itemize}
-
-\subsubsection{Accessing Matched Path}
-
-A matched path (alternating sequence of nodes and relationships) can be assigned to a variable by placing \code{variable =} in front of a path pattern:
-\begin{center}
-    \code{p = (a)-[:KNOWS*1..5]->(b)}
-\end{center}
-Functions to extract information from a path variable include:
-
-\begin{itemize}
-    \item \code{relationships(path)}: Returns the list of relationships in the path.
-    \item \code{nodes(path)}: Returns the list of nodes in the path.
-    \item \code{length(path)}: Returns the number of relationships in the path.
-\end{itemize}
-
-\subsubsection{Filter Conditions}
-
-Filter conditions are specified in \code{WHERE} clauses and determine which matched patterns are retained. A \code{WHERE} clause can contain:
-
-\begin{itemize}
-    \item Boolean expressions over properties and variables: \code{WHERE a.age > 18 AND a.name = 'Alice'}.
-    \item Logical operators: \code{AND}, \code{OR}, \code{XOR}, \code{NOT}.
-    \item Comparison operators: \code{=}, \code{<>}, \code{<}, \code{>}, \code{<=}, \code{>=}, \code{IS NULL}, \code{IS NOT NULL}.
-    \item String matching: \code{STARTS WITH}, \code{ENDS WITH}, \code{CONTAINS}, and regular expressions via \code{=~}.
-    \item List predicates: conditions over lists and their elements, but we will see this in the next section.
-    \item Path patterns: A \code{WHERE} clause can itself contain path patterns used as existential predicates. For example, \code{WHERE (a)-[:FRIEND]->(:Person)} filters for nodes that have at least one \code{FRIEND} relationship to a \code{Person}.
-    \item Existence checks: the function \code{exists(expression)} tests whether a property or path pattern yields a result.
-\end{itemize}
-
-The \code{WHERE} clause may be evaluated in any order by a database. When a \code{WHERE} follows a \code{MATCH}, it filters the results of that match. When it follows a \code{WITH}, it filters the rows produced by the preceding subquery.
+Expressions can be connected with binary logical operators --- \texttt{AND}, \texttt{OR}, \texttt{XOR} --- or negated with the unary operator \texttt{NOT}.
 
 \subsubsection{Other Features}
 
@@ -574,43 +806,49 @@ Cypher provides several additional features for advanced querying:
 
 \begin{itemize}
     \item Shortest path functions: \code{shortestPath((a)-[*]-(b))} returns a single shortest path between two nodes. \code{allShortestPaths((a)-[*]-(b))} returns all shortest paths.
-    \item The function \code{exists} returns true if the specified \code{pattern} occurs in the graph.
-    \item The function \code{isEmpty} returns true when the given string or list (or map) is empty.
-    \item Aggregate functions: \code{count}, \code{sum}, \code{avg}, \code{min}, \code{max}, \code{collect} (gathers values into a list), \code{stDev}, \code{percentileDisc}, etc.
-    \item Implicit grouping: When a \code{WITH} or \code{RETURN} clause contains both aggregate and non-aggregate expressions, the non-aggregate expressions serve as implicit grouping keys (like \code{GROUP BY} in SQL).
-    \item \code{DESC} / \code{ASC}: Specify sort order in \code{ORDER BY}, applied per property or to the whole ordering.
-    \item \code{DISTINCT}: Eliminates duplicate rows from the result set, used after \code{RETURN} or \code{WITH} (e.g., \code{RETURN DISTINCT a.name}).
-    \item List comprehension: list comprehension is a powerful construct to operate over lists in a functional way. The syntax (expressed in Bakkus-Naur form) is 
-        \begin{center}
-            \code{<list\_comprehension> ::= [<item> IN <list> [WHERE <predicate>][| <mapping\_expression>]]}
-        \end{center}
-    \item List functions: the following functions operate in the context of a list comprehension: \code{f(<list\_comprehension>)}: 
-        \begin{itemize}
-            \item The function \code{all} returns true when the \code{predicate} is true for \emph{all} the elements of the \code{list}. For example, \code{all(n IN nodes(path) WHERE n.age > 18)}.
-            \item The function \code{any} returns true when the \code{predicate} is true for \emph{any} of the elements of the \code{list}.
-            \item The function \code{none} returns true when the \code{predicate} is true for \emph{none} of the elements of the \code{list}.
-            \item The function \code{single} returns true when the \code{predicate} is true only for a \emph{single} element of the \code{list}.
-        \end{itemize}
-    \item \code{UNWIND}: Creates a row for each element of the list. Syntax: \code{UNWIND list AS column\_name}.
-    \begin{example}{}
-        This example produces a row for each intermediate station between \code{'Montesanto'} and \code{'Mergellina'}.
-        \begin{lstlisting}[language=SQL]
-MATCH (:Station {name: 'Montesanto'})
-      (()-[link:LINK]->(s)){1,}
-      (:Station {name: 'Mergellina'})
-UNWIND s AS station
-RETURN station.name AS 'station name' 
-        \end{lstlisting}
-    \end{example}
+    \item \code{DISTINCT}: It eliminates duplicate results. When applied in a \texttt{RETURN} or a \texttt{WITH} clause, it removes duplicate rows from the result set, and it can be used as well in aggregate functions (e.g., \texttt{COUNT(DISTINCT x)}.
 \end{itemize}
 
 Now, let's see two examples that comprise most of the introduced features of Cypher.
 \begin{example}{Friend Recommendation}
-    Find all pairs of persons who are not yet friends but share at least three common friends, and rank them by the number of common friends. Return up to 10 results, skipping the first 5.
+    Consider a graph representing people and friend relationships. The following graph is a subgraph that shows an example of two people who have three mutual friends but who are not friends:
+    \begin{center}
+    \begin{tikzpicture}[
+        node distance=1.5cm,
+        % Node styles
+        concept/.style={circle, draw, minimum size=0.6cm, align=center, fill=red!10},
+        property/.style={rectangle, draw, minimum size=0.8cm, align=center, fill=blue!10},
+        % Edge styles
+        relation/.style={-{Stealth[length=2mm]}, thick},
+        propedge/.style={dotted, thick}
+    ]
+        % Nodes
+        \node[concept] (a) at (0,0) {a};
+        \node[concept, right=6cm of a] (b) {b};
+        \node[concept, below right=1.5cm and 3.0cm of a] (x) {x};
+        \node[concept, right=2.8cm of a] (y) {y};
+        \node[concept, above right=1.5cm and 3.0cm of a] (z) {z};
+
+        % Relationships
+        \draw[relation] (a) -- node[left] {:KNOWS} (x);
+        \draw[relation] (a) -- node[above] {:KNOWS} (y);
+        \draw[relation] (a) -- node[left] {:KNOWS} (z);
+        \draw[relation] (x) -- node[above] {} (a);
+        \draw[relation] (y) -- node[above] {} (a);
+        \draw[relation] (z) -- node[above] {} (a);
+
+        \draw[relation] (b) -- node[right] {:KNOWS} (x);
+        \draw[relation] (b) -- node[above] {:KNOWS} (y);
+        \draw[relation] (b) -- node[right] {:KNOWS} (z);
+        \draw[relation] (x) -- node[above] {} (b);
+        \draw[relation] (y) -- node[above] {} (b);
+        \draw[relation] (z) -- node[above] {} (b);
+    \end{tikzpicture}
+    \end{center}
+    We want to find all pairs of people who are not yet friends but share at least three common friends, and rank them by the number of common friends. Return up to 10 results, skipping the first 5.
     \begin{lstlisting}[language=SQL, caption={Friend recommendation query}]
 MATCH (a:Person)-[:KNOWS]->(common:Person)<-[:KNOWS]-(b:Person)
-WHERE a <> b
-AND NOT (a)-[:KNOWS]-(b)
+WHERE NOT (a)-[:KNOWS]-(b)
 WITH a, b, count(common) AS commonFriends
 WHERE commonFriends >= 3
 RETURN a.name, b.name, commonFriends
@@ -621,9 +859,9 @@ LIMIT 10
 \end{example}
 
 \begin{example}{Path Existence and Aggregation}
-    For each person, find the shortest chain of \code{KNOWS} relationships to any person named \code{'Alice'} who works at \code{'Acme Corp'}. Return the person's name, the chain length, and the names along the path.
+    For each person, find, if possible, the shortest chain of \code{KNOWS} relationships to any person named \code{'Jessica'} who works at \code{'Tubotec'}. Return the person's name, the chain length, and the names along the path.
     \begin{lstlisting}[language=SQL, caption={Shortest path query with aggregation}]
-MATCH (b:Person {name: 'Alice'})-[:WORKS_AT]->(:Company {name: 'Acme Corp'})
+MATCH (b:Person {name: 'Jessica'})-[:WORKS_AT]->(:Company {name: 'Tubotec'})
 MATCH (a:Person)
 OPTIONAL MATCH p = shortestPath((a)-[:KNOWS*]-(b))
 WITH a, p, length(p) AS distance
@@ -635,6 +873,15 @@ RETURN a.name AS person,
        [n IN nodes(shortestPath) | n.name] AS pathNames
 ORDER BY minDistance ASC
     \end{lstlisting}
+    This query: 
+    \begin{enumerate}
+        \item matches, for each person \texttt{a}, the shortest path \texttt{p}. Rows are implicitly grouped by \texttt{a};
+        \item projects \texttt{a} and \texttt{p} and the computed \texttt{distance};
+        \item sorts rows by distance in ascending order;
+        \item keeps \texttt{a}, the first path, the first distance;
+        \item returns \texttt{a.name}, the distance, a list containing the names of the people in the path;
+        \item sorts by distance in ascending order, so that the people who know Jessica directly will appear in the first rows.
+    \end{enumerate}
 \end{example}
 
 \subsubsection{Error Handling}
@@ -647,6 +894,7 @@ Cypher uses the special value \code{null} to indicate missing, unknown, or erron
     \item A \code{null} value cannot be distinguished from an unbound variable: accessing a property that does not exist returns \code{null}.
 \end{itemize}
 
+\noindent
 A Cypher query fails (raises an error) in the following situations:
 
 \begin{itemize}
@@ -661,7 +909,7 @@ When a query fails, it returns an error to the client rather than a partial resu
 
 \subsection{Graph Database Design}
 
-Designing a graph database requires a shift in mindset from relational modeling: instead of normalizing data into tables and defining foreign keys, the designer focuses on identifying entities, their interactions, and the query patterns that drive the application.
+Designing a graph database requires a shift in mindset from relational modeling: instead of mapping entities to tables, attributes to columns and relationships to columns or tables, one must reason about nodes, labels, relationships and properties.
 
 \subsubsection{Design Process}
 
@@ -688,6 +936,11 @@ The design process follows a structured sequence of steps\cite{robinson2015graph
     Properties that are only occasionally accessed can be separated from the core entity, but denormalization is generally preferred over joins in graph databases.
 \end{enumerate}
 
+\noindent
+Graph database design is inherently \emph{iterative}. 
+One should start by modeling the entities and relationships that directly support the most critical queries, then test the model with realistic datasets and query workloads, then refine, adjusting label granularity, or denormalizing data to eliminate performance bottlenecks. 
+The flexibility of the graph model makes incremental evolution far less costly than in relational systems.
+
 \subsubsection{Properties vs. Relationships}
 
 A key design decision is whether to model a data element as a \textbf{property} or as a \textbf{relationship} to a separate node.
@@ -705,7 +958,7 @@ A key design decision is whether to model a data element as a \textbf{property} 
 This is actually a normalization vs. denormalization problem: storing an information as a node property (denormalization) is better for reads --- the property can be directly accessed ---, but inconvenient for updates --- the property must be updated for each node, possibly causing inconsistency.
 On the other hand, storing an information as a relationship is convenient for updates --- the node that contains the information gets updated once and consistency is guaranteed ---, while being inconvenient for reads --- one hop is added per node.
 
-In general, \textbf{relationships yield cleaner queries and better performance} when:
+In general, relationships yield cleaner queries and better performance when:
 
 \begin{itemize}
     \item The value is shared across many entities (avoid data duplication and enable efficient \q{who else lives in Naples?} queries).
@@ -723,31 +976,3 @@ A property should remain a property when:
     \item There is no need to traverse from the value to other entities.
 \end{itemize}
 
-\subsubsection{Supernodes}
-Nodes with an extremely high number of incident relationships (e.g., a product on an e-commerce platform purchased by millions of users, or a celebrity followed by tens of millions of fans) are called \keyword{supernodes}. 
-During a graph traversal, when the query engine reaches such a node, it must examine all its incident edges to find those that satisfy the pattern. 
-If a supernode has millions of relationships, this fan-out becomes a severe performance bottleneck, even with index-free adjacency --- the \(O(1)\) cost per hop still requires iterating over a potentially enormous edge list to apply filters and pattern conditions.
-
-Mitigation strategies include:
-\begin{itemize}
-    \item \textbf{Caching:} Frequently accessed supernode data and its immediate neighborhood can be cached in memory, avoiding repeated disk I/O. Application-level caching of aggregated results (e.g., \q{top 10 followers}) can also reduce the need to traverse the supernode at query time.
-    \item \textbf{Time-bounded subgraphs:} Restrict queries to a limited time window (e.g., \q{purchases in the last 6 months}) by storing temporal metadata on relationships. This reduces the effective degree of the supernode, as only recent relationships need to be traversed.
-    \item \textbf{Introducing intermediate grouping nodes:} Break a supernode's massive edge set into smaller, manageable chunks by inserting intermediate nodes that act as \q{sharding} layers. For example, instead of connecting millions of users directly to a popular product:
-    \[
-    \text{User}_1, \text{User}_2, \dots, \text{User}_n \xrightarrow{\text{PURCHASED}} \text{Product}
-    \]
-    one can introduce intermediate \code{Region} or \code{Cohort} nodes:
-    \[
-    \text{User} \xrightarrow{\text{BELONGS\_TO}} \text{Region} \xrightarrow{\text{CONTAINS\_PURCHASE}} \text{Product}
-    \]
-    A query that previously had to scan millions of edges from the \code{Product} node can now first navigate to the relevant \code{Region} and then traverse only a subset of users. This technique trades a small increase in path length for a dramatic reduction in fan-out at any single node.
-    \item \textbf{Label-based partitioning:} Assign additional, more specific labels to relationships or nodes (e.g., \code{:RecentPurchase}, \code{:ArchivedPurchase}) to enable the query engine to filter early and avoid scanning the entire edge set.
-    \item \textbf{Asynchronous materialization:} Precompute and store the results of common queries involving supernodes (e.g., \q{total purchases per day}) as properties on the supernode itself, updated periodically, so that real-time queries can read the precomputed value instead of traversing all incident edges.
-\end{itemize}
-
-\begin{note}{Iterative Design}
-    Graph database design is inherently \textbf{query-driven} and \textbf{iterative}. 
-    Start by modeling the entities and relationships that directly support the most critical queries.
-    Test the model with realistic datasets and query workloads, then refine, adjusting label granularity, or denormalizing data to eliminate performance bottlenecks. 
-    The flexibility of the graph model makes incremental evolution far less costly than in relational systems.
-\end{note}
