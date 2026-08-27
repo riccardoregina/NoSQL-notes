@@ -1,7 +1,7 @@
 \chapter{Resource Description Framework}
 The Resource Description Framework (RDF) is a standard for exchanging graphs. RDF allows the specification of graphs that are directed, edge-labelled, and constitute a restricted form of multi-graph where multiple edges can exist between two nodes only if these edges have different labels. RDF was introduced by the W3C as a foundational technology for the Semantic Web, aiming to provide a common data model for describing resources and their interrelationships in a machine-understandable way. The fundamental idea is to represent information as simple statements about resources, making it possible to merge data from diverse sources seamlessly and to reason about that data using formal logics.
 
-\section{RDF Graphs}
+\section{RDF Graphs: Building Blocks}
 RDF graphs are strictly connected to IRIs, which serve as the global identifiers that give resources unambiguous names on the Web. By using IRIs instead of local identifiers, RDF enables data integration across independently developed datasets: when two datasets use the same IRI to refer to the same entity, merging them automatically connects the information about that entity without the need for manual schema alignment. The structure of an RDF graph is that of a set of triples, each asserting a binary relationship between a subject and an object via a predicate. Despite the simplicity of this model, it is expressive enough to encode complex, semi-structured data.
 
 \subsection{URIs and IRIs}
@@ -88,7 +88,7 @@ This special case of literal is widely used to encode human-readable labels in m
 \subsection{Blank Nodes}
 RDF allows the specification of nodes that are not identified by an IRI. These are called blank nodes or bnodes. They are used to express that something exists at a given position in the graph, but without identifying a specific named object. They are analogous to existentially quantified variables in logic. Nowadays bnodes are generally avoided in favour of named IRIs, but they still occur in the RDF-encoding of the OWL Web Ontology Language.
 
-\section{RDF Graphs}
+\section{RDF Graphs: Definitions}
 \begin{definition}{RDF Graph}
     An RDF graph is a set of triples, each consisting of a \textbf{subject} (an IRI or a blank node), a \textbf{predicate} (an IRI), and an \textbf{object} (an IRI, a blank node, or a literal). Ill-typed literals are syntactically permitted in the abstract syntax.
 \end{definition}
@@ -281,6 +281,7 @@ ex:list rdf:type rdf:Seq ;
 \end{itemize}
 
 \section{SPARQL}
+% cite: https://www.w3.org/TR/sparql11-query/
 SPARQL (SPARQL Protocol and RDF Query Language) is the standard query language for RDF graphs, standardized by the W3C. The SPARQL specification consists of several major parts:
 \begin{itemize}
     \item A \textbf{query language} for retrieving and manipulating RDF data.
@@ -310,7 +311,7 @@ The structure of a SPARQL \code{SELECT} query consists of the following clauses,
 \end{definition}
 
 \begin{definition}{Basic Graph Pattern}
-    A \keyword{basic graph pattern} (BGP) is a set of triple patterns, interpreted as in conjunction (i.e., all triple patterns must match simultaneously).
+    A \keyword{basic graph pattern} (BGP) is a set of juxtaposed triple patterns, interpreted as in conjunction (i.e., all triple patterns must match simultaneously).
 \end{definition}
 
 When working with blank nodes (bnodes), one can associate a temporary identifier to a bnode within a query, so that the same bnode can be referenced in multiple triple patterns. This allows the query to track occurrences of that specific bnode across the pattern.
@@ -322,10 +323,13 @@ A given bnode identifier can appear only once per query part\footnote{A \q{query
 Moreover, one can combine multiple BGPs in the same \code{WHERE} clause by juxtaposing \keyword{group graph patterns}.
 
 \begin{definition}{Group Graph Pattern}
-    A group graph pattern (GGP) is a pattern expressed inside a pair of curly braces \code{\{...\}}.
+    A group graph pattern (GGP) is an arbitrarily complex pattern inside a pair of curly braces \code{\{...\}}.
+    It is \emph{arbitrarily} complex because it can contain just triple patterns --- in this case, it becomes a BGP --- as well as entire subqueries (\texttt{SELECT}-\texttt{WHERE}-...) and nested GPPs.
 \end{definition}
 
-GGPs are combined using the \code{Join} operation: %explain
+So, GGPs are more general patterns and a BGP is a trivial GGP.
+
+One can combine multiple GGPs by separating them with commas. The GGPs are combined using the \code{Join} operation, which combines the solutions of two group graph patterns by matching identical bindings for shared variables, producing a new set of solutions that satisfy both patterns simultaneously. It is equivalent to a natural join over the variable mappings.
 
 \subsubsection{Query Results}
 \begin{definition}{Solution Mapping}
@@ -334,17 +338,17 @@ GGPs are combined using the \code{Join} operation: %explain
 The function is partial because a given solution mapping typically binds only the variables that appear in the query's \code{WHERE} clause, and not every possible variable name. 
 This reflects the fact that a query result provides bindings only for the variables it actually used.
 
-\begin{definition}{Solution Multiset}
-    A \keyword{solution multiset} is a multiset\footnote{Compared to a set, a multiset allows multiple occurrences of identical elements. This means that, in a multiset, each item is associated with a cardinality.} of solution mappings.
-\end{definition}
-
 \begin{definition}{Solution}
-    Given an RDF graph \(G\) and a BGP \(P\), a solution mapping \(\mu\) is a \keyword{solution} if it is defined exactly on the variables in \(P\) and there exists a mapping \(\sigma\) from blank nodes to RDF terms such that \(\mu(\sigma(P))\subseteq G\), i.e. \(\mu(\sigma(P))\) is a subgraph of \(G\).
-    
-    The \textbf{cardinality} of \(\mu\) in the solution multiset is the number of distinct \(\sigma\) mappings that satisfy the condition.
+    Given an RDF graph \(G\) and a BGP \(P\), a solution mapping \(\mu\) is a \keyword{solution} if it is defined exactly on the variables in \(P\) and there exists a mapping \(\sigma\) from blank nodes to RDF terms such that \(\mu(\sigma(P))\subseteq G\), i.e. \(\mu(\sigma(P))\) are terms that exist in \(G\).
+    A BGP \(P\) can yield, over the graph \(G\), several solutions that are contained in the \keyword{solution multiset}\footnote{Compared to a set, a multiset allows multiple occurrences of identical elements. This means that, in a multiset, each item is associated with a cardinality.}(denoted \(\text{eval}_G(P)\)), where the cardinality of each solution \(\mu\) equals the number of distinct \(\sigma\) mappings that satisfy the condition.
 \end{definition}
 
-We denote the multiset as \(\text{eval}_G(P)\). Now, let's examine an example to better understand the notion of cardinality.
+\begin{note}{Connection with Logics}
+    A solution can be seen as a model \(\mu\) that satisfies the condition expressed in the BGP \(P\) with a mapping \(\sigma\) that maps the blank nodes (equivalent to existentially quantified variables) to terms of the graph \(G\).
+\end{note}
+
+\noindent
+Now, let's examine an example to better understand the notion of cardinality.
 
 \begin{example}{}
     Let's consider the following graph \(G\) in Turtle syntax:
@@ -376,7 +380,7 @@ WHERE eg:Arrival eg:actorRole eg:aux1 .
 
 # output: true
 \end{lstlisting}
-Such a query can admit only two solutions: \(\set{}\) (false: the pattern did not match) and \(\set{\emptyset}\) (true: the pattern did match, where \(\emptyset\) denotes the empty mapping).
+Such a query can produce only two kinds of solution multiset: \(\text{eval}(P)_G = \set{}\) (false: the pattern did not match) and \(\text{eval}(P)_G = \set{\emptyset}\) (true: the pattern did match, where \(\emptyset\) denotes the empty mapping).
 
 \subsubsection{Other Query Forms}
 Beyond the basic \code{SELECT} form, SPARQL provides three additional query forms:
@@ -446,6 +450,8 @@ A \keyword{property path} can be expressed in regex-like form:
     A \keyword{property path pattern} is a triple \(\langle s, p, o\rangle\), where \(s\) and \(o\) are arbitrary RDF terms and \(p\) is a property path.
 \end{definition}
 
+\noindent
+A property path pattern is an extension of the triple pattern to property paths instead of basic predicates.
 As for triple patterns, the described syntax is purely abstract: we need a way to practically represent it.
 This is done by extending the Turtle syntax, allowing property paths to take place of predicates.
 
@@ -454,14 +460,14 @@ This is done by extending the Turtle syntax, allowing property paths to take pla
     \[
     \Path{PP} = \begin{cases}
         \{\text{iri}\} & PP=\text{iri}  \\[4pt]
-        \Path{PP} \setminus \bigcup_{i=1}^{n}\Path{\text{iri}_i} & PP=!(\text{iri}_1|\ldots |\text{iri}_n) \\[4pt]
-        \Path{PP} \setminus \bigcup_{i=1}^{n}\Reversed{\Path{\text{iri}_i}} & PP=!(\text{\textasciicircum iri}_1|\ldots | \text{\textasciicircum iri}_n) \\[4pt]
         \bigcup_{i \geq 0}PP^i & PP=PP^* \\[4pt]
         \bigcup_{i \geq 1}PP^i & PP=PP^+ \\[4pt]
         \Path{PP} \cup \{\varepsilon\} & PP=PP? \\[4pt]
         \Reversed{PP} & PP=\text{\textasciicircum}PP \\[4pt]
         \Path{PP_1} \circ \Path{PP_2} & PP=PP_1/PP_2 \\[4pt]
-        \Path{PP_1} \cup \Path{PP_2} & PP=PP_1|PP_2
+        \Path{PP_1} \cup \Path{PP_2} & PP=PP_1|PP_2 \\[4pt]
+        \Path{PP} \setminus \bigcup_{i=1}^{n}\Path{\text{iri}_i} & PP=!(\text{iri}_1|\ldots |\text{iri}_n) \\[4pt]
+        \Path{PP} \setminus \bigcup_{i=1}^{n}\Reversed{\Path{\text{iri}_i}} & PP=!(\text{\textasciicircum iri}_1|\ldots | \text{\textasciicircum iri}_n)
     \end{cases}
     \]
 
@@ -536,8 +542,10 @@ Let's start with the projection clause i.e. (\code{SELECT}).
 \begin{definition}{Projection of a Solution Mapping}
     Given a solution mapping \(\mu\), we define its \keyword{projection} \(\pi=\mu|_{V}\) as its restriction to \(V\), that is a set of variables.
     The cardinality of \(\pi\) inside the new solution multiset \(\Pi\) is the sum of cardinalities of all \(\nu\in\Omega\) s.t. \(\nu|_{V}=\pi\), where \(\Omega\) is the staring solution multiset.
+    In other words, if some \(\nu\in\Omega\) share the same bindings for the variables in \(V\), then their projections \(\nu|_{V}\) collapse in a single solution \(\pi\in\Pi\) and the cardinality of \(\pi\) equals the sum of the cardinalities of the collapsed \(\nu\in\Omega\). 
 \end{definition}
 
+\noindent
 To make all the solutions of a solution multiset have cardinality one, we have to use the \code{DISTINCT} modifier of the \code{SELECT} clause (i.e., \code{SELECT DISTINCT}).
 
 \subsubsection{Solution Multiset Modifiers}
@@ -637,8 +645,8 @@ This is analogous to a \emph{left outer join} in SQL: all results from the manda
     Retrieve all persons and, if available, their email addresses:
     \begin{lstlisting}[language=SQL, caption={Using OPTIONAL for missing data}]
 SELECT ?person ?email WHERE {
-?person rdf:type :Person .
-OPTIONAL { ?person :hasEmail ?email }
+    ?person rdf:type :Person .
+    OPTIONAL { ?person :hasEmail ?email }
 }
     \end{lstlisting}
     Persons without an email are still returned, with \code{?email} unbound.
@@ -662,7 +670,7 @@ Variables projected by the subquery can be used in the outer query. Variables us
 SELECT ?person ?paperCount WHERE {
     {
         SELECT ?person (COUNT(?paper) AS ?paperCount) WHERE {
-        ?person :authored ?paper .
+            ?person :authored ?paper .
         }
         GROUP BY ?person
     }
@@ -681,12 +689,12 @@ The injected solution multiset is \emph{constant} (contains only IRIs and litera
     We want to find all the people who know Alice, who are a composer and who have a child.
     \begin{lstlisting}[language=SQL]
 SELECT DISTINCT ?sub WHERE {
-VALUES (?predicate ?obj) {
-    (eg:knows eg:Alice)
-    (eg:profession eg:Composer)
-    (eg:hasChild UNDEF)
-}
-?sub ?predicate ?obj
+    VALUES (?predicate ?obj) {
+        (eg:knows eg:Alice)
+        (eg:profession eg:Composer)
+        (eg:hasChild UNDEF)
+    }
+    ?sub ?predicate ?obj
 }
     \end{lstlisting}
     Each row provides bindings for the specified variables. The special value \keyword{\code{UNDEF}} leaves a variable unbound for that row, meaning the query engine should treat it as a free variable to be matched against the data.
@@ -704,7 +712,6 @@ SELECT DISTINCT ?sub WHERE {
     BIND (YEAR(?date) AS ?year)
     ?sub eg:favourite_number ?year
 }
-BIND (YEAR(?birthDate) AS ?birthYear)
     \end{lstlisting}
     This could have been also done with a \code{FILTER} statement, but this way is more direct.
 \end{example}
@@ -750,6 +757,164 @@ Error propagation in SPARQL works as follows:
 
 This design ensures that a type error on a single tuple does not abort the entire query: only the offending solution is filtered out, while valid solutions are still returned. 
 This is analogous to how SQL's \code{NULL} propagation works in \code{WHERE} clauses, but with explicit three-valued logic for error handling.
+
+\subsection{Some SPARQL Queries Examples}
+Now that we have all the required notions, let's see some examples of SPARQL queries on a example RDF graph.
+Let's consider the following graph represented in Turtle syntax:
+\begin{lstlisting}
+# Prefixes
+@prefix uni: <http://example.org/university#> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+# Ontology: Classes with hierarchy
+foaf:Person a rdfs:Class ;
+    rdfs:label "Person" .
+
+uni:Student a rdfs:Class ;
+    rdfs:subClassOf foaf:Person ;
+    rdfs:label "Student" .
+
+uni:Teacher a rdfs:Class ;
+    rdfs:subClassOf foaf:Person ;
+    rdfs:label "Teacher" .
+
+uni:Course a rdfs:Class ;
+    rdfs:label "Course" .
+
+uni:Exam a rdfs:Class ;
+    rdfs:label "Exam" .
+
+# RDF Graph
+
+# Generic persons (neither students nor teachers)
+uni:secretary a foaf:Person ;
+    foaf:name "Gennaro Locascio" .
+
+# Teachers
+uni:prof_rossi a uni:Teacher ;
+    foaf:name "Mario Rossi" .
+
+# Students
+uni:anna a uni:Student ;
+    foaf:name "Anna Verdi" .
+
+uni:luca a uni:Student ;
+    foaf:name "Luca Bianchi" .
+
+# Courses
+uni:computer_science a uni:Course ;
+    foaf:name "Computer Science" ;
+    uni:credits 6 .
+
+uni:mathematics a uni:Course ;
+    foaf:name "Mathematics" ;
+    uni:credits 9 .
+
+# Exams (exam instances with grades)
+uni:exam1 a uni:Exam ;
+    uni:grade 28 ;
+    uni:examForCourse uni:computer_science .
+
+uni:exam2 a uni:Exam ;
+    uni:grade 30 ;
+    uni:examForCourse uni:mathematics .
+
+uni:exam3 a uni:Exam ;
+    uni:grade 25 ;
+    uni:examForCourse uni:computer_science .
+
+# Relationships
+uni:prof_rossi uni:teaches uni:computer_science, uni:mathematics .
+uni:anna uni:enrolledIn uni:mathematics .
+uni:luca uni:enrolledIn uni:computer_science .
+uni:anna uni:hasExam uni:exam1, uni:exam2 .
+uni:luca uni:hasExam uni:exam3 .
+\end{lstlisting}
+
+Here are some examples of SPARQL requests based on the graph above, along with their respective queries and a brief explanation of the critical design choices.
+
+\subsubsection*{Example 1: Counting Enrolled Students per Course}
+\textbf{Request:} Find all courses and for each of them the number of enrolled students.
+
+\begin{lstlisting}
+SELECT ?c (COUNT(?s) AS ?enrolled)
+WHERE {
+    {
+        SELECT ?c
+        WHERE {
+            ?c a uni:Course .
+        }
+    }
+    OPTIONAL {  
+        ?s a uni:Student;
+           uni:enrolledIn ?c .
+    }
+}
+GROUP BY ?c
+\end{lstlisting}
+\textbf{Critical Choices:} 
+The use of \texttt{OPTIONAL} is crucial here. If we used a standard graph pattern, courses with zero enrolled students would be completely excluded from the results. By isolating the courses in a subquery and making the student enrollment optional, we ensure all courses are listed, returning a count of 0 for empty courses. The \texttt{GROUP BY} clause is mandatory since we are mixing an aggregate function (\texttt{COUNT}) with a standard projected variable (\texttt{?c}).
+
+\subsubsection*{Example 2: Filtering on Specific Paths}
+\textbf{Request:} Find all students who have taken at least one exam for a course taught by Prof. Mario Rossi with a grade higher than 26.
+
+\begin{lstlisting}
+SELECT DISTINCT ?s
+WHERE {
+    {
+        SELECT ?c
+        WHERE {
+            uni:prof_rossi uni:teaches ?c .
+        }
+    }
+    ?s uni:hasExam ?e .
+    ?e uni:examForCourse ?c .
+    ?e uni:grade ?g .
+    FILTER (?g > 26)
+}
+\end{lstlisting}
+\textbf{Critical Choices:} 
+\texttt{SELECT DISTINCT} prevents duplicate rows. Without it, a student who passed multiple exams with Prof. Rossi (both $> 26$) would appear multiple times in the results. The \texttt{FILTER} clause must enclose its condition in parentheses.
+
+\subsubsection*{Example 3: Handling Missing Data}
+\textbf{Request:} Find all persons with their names and, if they have it, the degree course they are enrolled in.
+
+\begin{lstlisting}
+SELECT ?p ?pname ?dc
+WHERE {
+    ?p a foaf:Person ;
+       foaf:name ?pname .
+    OPTIONAL {
+        ?p uni:enrolledIn ?dc .
+    }
+}
+\end{lstlisting}
+\textbf{Critical Choices:} 
+Since the \texttt{foaf:Person} class includes teachers and secretaries who are not enrolled in any course, the \texttt{OPTIONAL} block is necessary. This guarantees that all persons are returned; the \texttt{?dc} variable will simply be unbound (empty) for non-student persons.
+
+\subsubsection*{Example 4: Global Aggregation via Subqueries}
+\textbf{Request:} Find all students who have taken at least one exam with a grade higher than the general average of all exams (taken by all students).
+
+\begin{lstlisting}
+SELECT DISTINCT ?s
+WHERE {
+    {
+        SELECT (AVG(?g) AS ?average)
+        WHERE {
+            ?e a uni:Exam ;
+               uni:grade ?g .
+        }
+    }
+    ?s uni:hasExam ?e .
+    ?e uni:grade ?g .
+    FILTER (?g > ?average)
+}
+\end{lstlisting}
+\textbf{Critical Choices:} 
+The subquery effectively computes a single, global aggregate value (\texttt{?average}) and projects it into the outer scope. SPARQL 1.1 scoping rules allow variables like \texttt{?e} and \texttt{?g} to be reused safely inside and outside the subquery because the subquery only projects \texttt{?average}, preventing namespace collisions.
 
 \section{An example of RDF Knowledge Graph: Wikidata}
 Wikidata is Wikipedia's knowledge graph. Its practical applications stem from its role as a central, structured data hub: it provides data for Wikipedia infoboxes across all languages, powers the Google Knowledge Graph, and enables complex cross-domain queries, making it a fundamental resource for research, data integration, and AI systems.
