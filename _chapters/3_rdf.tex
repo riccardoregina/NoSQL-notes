@@ -281,7 +281,6 @@ ex:list rdf:type rdf:Seq ;
 \end{itemize}
 
 \section{SPARQL}
-% cite: https://www.w3.org/TR/sparql11-query/
 SPARQL (SPARQL Protocol and RDF Query Language) is the standard query language for RDF graphs, standardized by the W3C. The SPARQL specification consists of several major parts:
 \begin{itemize}
     \item A \textbf{query language} for retrieving and manipulating RDF data.
@@ -489,7 +488,7 @@ Now, we can define a solution for a property path pattern.
 Moreover, empty paths (\(\varepsilon\)) exist from any node to itself.
 
 Now, we have to explain a bit on how solutions are found by the query engine, so that we will understand some of its unintuitive features.
-The official SPARQL 1.1 algebra says that property paths built with \code{*}, \code{+}, \code{?} are evaluated via an ALP (Arbitrary Length Path) algorithm, which is essentially a graph-reachability search. So, ALP searches if a path from \(s\) to \(o\) exists and does not search for all possible paths between these two nodes. 
+The official SPARQL 1.1~\cite{sparql11} algebra says that property paths built with \code{*}, \code{+}, \code{?} are evaluated via an ALP (Arbitrary Length Path) algorithm, which is essentially a graph-reachability search. So, ALP searches if a path from \(s\) to \(o\) exists and does not search for all possible paths between these two nodes. 
 So, a query containing a property path pattern that comprises \code{*}, \code{+}, \code{?} will yield, if found, a single solution.
 On the other hand, property paths that are built only with operators that don't involve unbounded repetition (\code{iri}, \code{\textasciicircum}, \code{/}, \code{|}, \code{!}) are evaluated by composing simple triple patterns with unions and joins between the intermediate solution multisets.
 
@@ -930,9 +929,10 @@ Wikidata can be seen as a:
     \begin{itemize}
         \item \emph{Entity ID}: a language-independent id (e.g. \code{Q17515} identifies Diego Armando Maradona);
         \item \emph{Terms header}: a list of language-specific aliases (e.g. \q{El Pibe de Oro} for Italian);
-        \item \emph{Statements}: sourced claims\footnote{A Wikidata claim is a subject-property-value triple.} for several properties that the entity might have, with a rank (normal, preferred, deprecated) to encode their current significance (preferred statements are marked as the most important; deprecated ones are known to be wrong but kept for reference), qualifiers (context information like 
-        \q{excluding non-official matches}), references (one or more sources backing up the claim). For example, \code{Q17515} \(\to\) \q{member of sports team} \(\to\) \q{SSC Napoli};
-        \item \emph{Site links}: Connections to pages on other Wikimedia projects realise entity-level information integration.
+        \item \emph{Statements}: an unordered set of statements, which are subject-property-value triples representing properties that the entity has. Each statement can have \emph{qualifiers}, which are property-value couples that add further information about it, and \emph{references} --- one or more sources about it. 
+            A statement has a rank (normal, preferred, deprecated) to encode its significance\footnote{Preferred statements are marked as the most important; deprecated ones are known to be wrong but kept for reference.}. 
+            For example, D.A. Maradona has the statement \code{Q17515} \(\to\) \q{member of sports team} \(\to\) \q{SSC Napoli} with qualifier (it is not the only one) \code{start time}\(\to\) \code{1984};
+        \item \emph{Site links}: connections to pages on other Wikimedia projects realise entity-level information integration.
     \end{itemize}
 \end{definition}
 
@@ -940,18 +940,18 @@ Wikidata can be seen as a:
 Wikidata is internally stored in JSON, which is a document-centric format, and so data has to be converted to RDF to allow SPARQL queries.
 Before converting Wikidata to the RDF format, some discrepancies between the two must be resolved:
 \begin{enumerate}
-    \item Wikidata statements have \keyword{annotations}, property-value pairs that add information to the statement;
+    \item Wikidata statements have qualifiers, property-value pairs that add information to the statement;
     \item Wikidata property types do not correspond to XML Schema types; 
     \item Wikidata IDs are not immediately IRIs.
 \end{enumerate}
-However, Wikidata and RDF have some similarities: 
+Apart from these differences, Wikidata and RDF are very similar: 
 \begin{enumerate}
     \item Both are directed labeled graphs;
-    \item All data that appear inside a statement can be subjects/objects in other statements: Wikidata is a hypergraph;
-    \item Statements order does not matter.
+    \item All data that appear inside a statement can be subjects/objects in other statements: Wikidata is self-explaining. 
+    \item The order of statements does not matter.
 \end{enumerate}
 
-To represent annotations, we reify the overall statement into a standalone entity and then connect it to the annotations by creating a triple for each annotation as object and the overall statement as subject.
+To represent qualifiers, we reify the overall statement into a standalone entity and then connect it to the annotations by creating a triple for each annotation as object and the overall statement as subject.
 Moreover, the annotation properties with \q{preferred} rank become objects of direct subject-property-object, to allow a more direct navigation for relevant information.
 If no \q{preferred} annotation properties exist, those with \q{normal} rank will take their place, while \q{deprecated} ones cannot.
 
@@ -973,7 +973,7 @@ In general, each Wikidata property turns into several RDF properties, whose type
         \texttt{wdno:} & \texttt{http://www.wikidata.org/prop/novalue/} & \texttt{wdno:P40} (no children) \\
         \texttt{wds:} & \texttt{http://www.wikidata.org/entity/statement/} & \texttt{wds:Q17515-...} (statement ID) \\
         \texttt{wdref:} & \texttt{http://www.wikidata.org/reference/} & \texttt{wdref:...} (reference ID) \\
-        \texttt{wikibase:} & \texttt{http://wikiba.se/ontology\#} & \texttt{wikibase:rank} \\
+        \texttt{wikibase:} & \texttt{http://wikiba.se/ontology\#} & \texttt{wikibase:rank} (links, for example, with \texttt{wikibase:NormalRank}) \\
         \hline
     \end{tabular}
 \end{table}
@@ -993,6 +993,25 @@ for simple truthy statements, and the statement-level property IRI
 \end{center}
 when reified statements with qualifiers or references are needed.
 
+\begin{example}{}
+    The previously mentioned statement about D.A. Maradona is transformed in the following RDF Turtle code:
+    \begin{lstlisting}
+# The direct statement
+# (Maradona) (direct: member of sports team) (SSC Napoli)
+wd:Q17515 wdt:P54 wd:Q128326 . 
+
+# The reified statement
+# (Maradona) (has statement: member of sports team) (Statement ID)
+wd:Q17515 p:P54 wds:Q17515-38b4d8ec-4f81-5a63-a20c-7b06606a247e .
+
+# (Statement ID) (statement value: member of sports team) (SSC Napoli)
+wds:Q17515-38b4d8ec-4f81-5a63-a20c-7b06606a247e ps:P54 wd:Q128326 .
+
+# (Statement ID) (qualifier: start time) (1984)
+wds:Q17515-38b4d8ec-4f81-5a63-a20c-7b06606a247e pq:P580 "1984-01-01T00:00:00Z"^^xsd:dateTime .
+    \end{lstlisting}
+\end{example}
+
 \subsection{Wikidata SPARQL Query Service (WDQS)}
 The Wikidata Query Service (WDQS) is a public SPARQL endpoint that provides live, low-latency access to Wikidata's RDF data, updated in sync with edits made to Wikidata. It allows users to run complex queries over the entire knowledge graph without any local setup.
 Common ways to access WDQS include:
@@ -1003,21 +1022,31 @@ Common ways to access WDQS include:
 \end{itemize}
 
 \begin{example}{}
-    Navigate to \url{https://query.wikidata.org/} and type the following SPARQL query to find out all the players who have played with D.~A.~Maradona.
+    Navigate to \url{https://query.wikidata.org/} and type the following SPARQL query to find all the players who have played with D.~A.~Maradona. You should find 480 results.
     \begin{lstlisting}[language=sql]
 PREFIX wd: <http://www.wikidata.org/entity/>
 PREFIX wdt: <http://www.wikidata.org/prop/direct/>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 
-SELECT DISTINCT ?playerLabel ?clubLabel WHERE {
- wd:Q17515 wdt:P54 ?club . -- Q17515 is Maradona's id; P54 is the 'member of sports team' property id.
- ?player wdt:P54 ?club .
- ?player wdt:P106 wd:Q937857 . -- P106 is the 'occupation' property id; Q937857 is the id of 'association football player'.
- FILTER(?player != wd:Q17515) -- we filter out Maradona himself
- ?player rdfs:label ?playerLabel .
- FILTER(LANG(?playerLabel) = "en")
- ?club rdfs:label ?clubLabel .
- FILTER(LANG(?clubLabel) = "en")
+SELECT ?playerLabel ?clubLabel 
+WHERE {
+    wd:Q17515 p:P54 ?stmtM . # P54 is the 'member of sports team' property id.
+    ?stmtM ps:P54 ?club .
+    ?stmtM pq:P580 ?startYearM ;
+          pq:P582 ?endYearM .
+
+    ?player wdt:P106 wd:Q937857 . # P106 is the 'occupation' property id; Q937857 is the id of 'association football player'.
+    FILTER(?player != wd:Q17515) # we filter out Maradona himself
+    ?player p:P54 ?stmt .
+    ?stmt ps:P54 ?club .
+    ?stmt pq:P580 ?startYear ;
+           pq:P582 ?endYear .
+    FILTER(?startYearM <= ?endYear && ?endYearM >= ?startYear)
+    
+    ?player rdfs:label ?playerLabel .
+    FILTER(LANG(?playerLabel) = "en")
+    ?club rdfs:label ?clubLabel .
+    FILTER(LANG(?clubLabel) = "en")
 }
 ORDER BY ?clubLabel ?playerLabel
     \end{lstlisting}
