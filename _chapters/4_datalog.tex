@@ -59,7 +59,7 @@ AND   A2.code = F.destination
 \end{lstlisting}
 while the First-Order Logic (FOL) representation of this query is simply:
 \[
-\exists X,Y,Z:\; \text{airport}(X,\text{London}) \land \text{airport}(Y,\text{Glasgow}) \land \text{flight}(X,Y,Z)
+    \set{Z \mid \exists X,Y:\; \text{airport}(X,\text{London}) \land \text{airport}(Y,\text{Glasgow}) \land \text{flight}(X,Y,Z)}
 \]
 Notice how the FOL formula is much more expressive and succinct than the SQL query: it directly captures the \emph{logical structure} of the request without the syntactic overhead of joins, aliases, and variable naming conventions.
 
@@ -110,25 +110,25 @@ This property is known as the \keyword{finite domain assumption}.
 Because no new compound terms can be constructed during rule evaluation, the search space remains bounded and termination is guaranteed.
 
 \begin{definition}{Atom}
-    An \keyword{atom} is a predicate symbol applied to a tuple of terms: \(p(t_1, t_2, \dots, t_n)\). Atoms represent \emph{relational tuples}.
+    An \keyword{atom} is a predicate symbol applied to a tuple of terms: \(p(t_1, t_2, \dots, t_n)\). Atoms represent \emph{relationships} between terms.
 \end{definition}
-For example, the atom \code{flight(X, Y, Z)} asserts that a relationship named \code{flight} holds among the terms \code{X}, \code{Y}, and \code{Z}. The \textbf{arity} (number of arguments) of an atom is fixed by the relation schema: \code{flight} has arity 3, \code{airport} has arity 2.
+For example, the atom \code{flight(X, Y, Z)} asserts that a relation named \code{flight} holds among the terms \code{X}, \code{Y}, and \code{Z}. The \textbf{arity} (number of arguments) of an atom is fixed by the relation schema: \code{flight} has arity 3, \code{airport} has arity 2.
 
 Atoms are categorized according to whether they refer to stored or derived relations:
 
 \begin{definition}{EDB Atom}
-    An \keyword{Extensional Database Atom} refer to base relations stored explicitly in the database (e.g., \code{flight}, \code{airport}).
+    An \keyword{Extensional Database Atom} is relation that is explicitly stored in the database (e.g., \code{flight}, \code{airport}).
 \end{definition}
 
 \begin{definition}{IDB Atom}
-    An \keyword{Intensional Database Atom} refer to derived relations defined by rules (e.g., \code{reachable}, \code{ans}).
+    An \keyword{Intensional Database Atom} is a relation that is derived by defined rules (e.g., \code{reachable}, \code{ans}).
 \end{definition}
 
-Intuitively, EDB atoms are ground truths, while IDB atoms must be derived and are latent information inside the database.
+Intuitively, EDB atoms are ground truths, while IDB atoms must be derived and are latent information in the database.
 
 \subsection{Rules and Queries}
 
-A Datalog program consists of a set of \keyword{rules} and a \keyword{query}.
+A Datalog program consists of a finite set of \keyword{rules} and a \keyword{query}.
 
 \begin{definition}{Datalog Rule}
     A \keyword{Datalog rule} has the form:
@@ -142,6 +142,7 @@ A Datalog rule specifies that if the body holds, then also the head does.
 \begin{definition}{Fact}
     A \keyword{fact} is a rule with an empty body (written simply as \code{head.}) and represents a ground truth.
 \end{definition}
+A fact is essentially an EDB atom.
 
 \begin{definition}{Datalog Query}
     A \keyword{Datalog query} is a special rule where the head is a distinguished predicate (often \code{ans} or \code{query}) containing the variables to be returned. 
@@ -153,46 +154,62 @@ To guarantee that the result of any query is finite and computable, Datalog rule
 \begin{definition}{Rule Safety}
     A Datalog rule is \keyword{safe} if \emph{every} variable appearing in the head of the rule also appears in at least one positive (non-negated) body atom. 
 \end{definition}
-Consider the \emph{unsafe} rule \code{ans(X) :- not flight(X,Y,Z)}. This rule may lead to an infinite set of results.
+In logic programming, variables are implicitly drawn from the entire universe of discourse (e.g., all possible text strings, all possible integers). 
+A positive atom like \texttt{airport(X, 'London')} acts as a filter, restricting \(X\) to only the values actually present in the database.
+Consider the \emph{unsafe} rule \code{ans(X) :- not flight(X,Y,Z)}. 
+In this rule, the variable \(X\) is only evaluated against a negative condition and hence the query engine would attempt to generate an output for every single possible string.
+So, there are infinitely many values for \(X\), \(Y\), and \(Z\) that do not exist in the finite flight table.
 
 \subsection{Semantics: Immediate Consequence and Least Fixed Point}
 
-The semantics of a Datalog program is defined in terms of the \keyword{immediate consequence operator} \(T_P\), which formalizes the idea of \q{applying all rules once} to a given set of facts.
+Rules of a Datalog program are logical propositions asserting a property of the output.
+Hence, we can convert a Datalog program \(P\) to a set of universally quantified FOL sentences \(\Sigma[P]\) that describe the desired output of \(P\) on the database \(D\).
+For example, the rule \(\rho\)
+\[
+    r_0 \;\text{\texttt{:-}}\; r_1, r_2, \dots, r_n .
+\]
+is converted to \(\phi[\rho]\)
+\[
+    \forall V_1, V_2, \ldots V_n (r_1 \land r_2 \land \ldots \land r_n \to r_0)
+\]
+where the variables \(V_i\) are the variables occurring in \(\rho\). 
+
+\begin{definition}{Model}
+    A database\footnote{A database here is intended as a set of facts, which does not necessary equal the actual original database.} \(D\) is a \keyword{model} of a sentence \(\phi[\rho]\) if whenever there exists a homomorphism \(h\) from the body atoms of \(\phi[\rho]\) to \(D\) then \(h\) is also a homomorphism from the conclusion of \(\phi[\rho]\) to \(D\).
+\end{definition}
+The homomorphism formalizes the concept of pattern matching of a rule with some atom of the database. The definition is telling us that if \(D\models\phi[\rho]\), then if \(r_1,r_2 \ldots r_n \subset D\), we also have \(r_0 \subset D\).
+Let's see how to define such a homomorphism.
+
+\begin{definition}{Substitution}
+    A \keyword{substitution} is a mapping \(\sigma: A \to B\) from a set of terms\footnote{Recall that \q{term} is the general name to refer to both variables and constants.} \(A\) to another set of terms \(B\).
+\end{definition}
+We can now extend the concept of substitution to set of atoms by finally defining our homomorphism \(h\), that is namely a homomorphism between two set of atoms \(A\) and \(B\) that is based on the \(\sigma\) substitution:
+\[
+    r(t_1,\ldots,t_n) \in A \implies r(t_1,\ldots,t_n)\sigma = r(\sigma(t_1),\ldots,\sigma(t_n)) \in B.
+\]
+However, such homomorphism may be infinite and so, given a database and a sentence \(\phi[\rho]\), infinite models may exist.
+We are interested in the \keyword{minimal model} though. Such minimal model is unique because Datalog rules are Horn clauses, which possess the \emph{model intersection property}: the intersection of any set of models is still a model. 
+Therefore, intersecting all valid models yields a single, smallest model containing only the facts logically necessitated by the program.
+This unique model is obtained by applying a fixpoint procedure, that we will see in a moment.
+
+The semantics of a Datalog program is defined in terms of the \keyword{immediate consequence operator} \(T_P\), which formalizes the idea of \q{applying all rules once} to a given database.
 
 \begin{definition}{Immediate Consequence Operator}
-    Given a Datalog program \(P\) and a database \(D\) be a database instance (i.e., a set of EDB atoms). 
-    The \keyword{immediate consequence operator} \(T_P(D)\) is the set of all facts that can be derived by applying the rules of \(P\) to \(D\) in a single step. Formally:
+    Given a Datalog program \(P\) and a database \(D\), the \keyword{immediate consequence operator} \(T_P(D)\) is the set of all facts that can be derived by applying the rules of \(P\) to \(D\) in a single step. Formally:
     \[
     T_P(D) = \{\, \text{head}\sigma \mid (\text{head} \;\text{\texttt{:-}}\; B_1, \dots, B_n) \in P \text{ and } \{B_1\sigma, \dots, B_n\sigma\} \subseteq D \,\}
     \]
-    where \(\sigma\) is a substitution mapping variables to constants.
+    where \(\sigma\) is the preoviously mentioned homomorphism and maps all variables to constants.
+    In words, if there is a rule in \(D\) s.t. by replacing (via \(\sigma\)) its variables with constants its body atoms \(B_1,\ldots,B_n\) belong to \(D\), then we add the rule head to \(D\) with the applied substitutions.
 \end{definition}
 
-Starting from the EDB atoms of the database (\(D\)), repeated application of \(T_P\) builds larger and larger sets of facts:
+Starting from the EDB atoms of the database \(D\), repeated application of \(T_P\) builds larger and larger databases:
 \[
-T_{P,0}(D) = D, \quad T_{P, i+1}(D) = T_P(T_{P, i}(D))
+T_{P,0}(D) = D, \quad T_{P, i+1}(D) = T_{P, i}(D) \cup T_P(T_{P, i}(D))
 \]
-Since Datalog rules are monotonic (adding facts only adds more derivable facts, never removes them) and the domain is finite, this sequence converges after finitely many steps to a \keyword{least fixed point}, denoted \[T_{P,\infty}(D)=\bigcup_{i=0}^{\infty}T_{P,i}(D).\]
+Since Datalog rules are monotonic (adding facts only adds more derivable facts, never removes them), the starting database is finite and no datalog rules can create new constants (this is why functions are not allowed), this sequence converges after finitely many steps to a \keyword{least fixed point}, denoted \[T_{P,\infty}(D)=\bigcup_{i=0}^{\infty}T_{P,i}(D).\]
+
 This fixed point is exactly the set of all facts logically entailed by the program and the database: it is the \keyword{minimal model} of the program.
-
-\begin{note}{Least Fixed Point as Minimal Model}
-    A Datalog program \(P\) together with a database \(D\) can be seen as a set of first-order sentences (Horn clauses) that must be satisfied. 
-    A \keyword{model} of \(P \cup D\) is any set of ground atoms \(M\) that:
-    \begin{enumerate}
-        \item Contains all EDB facts from \(D\).
-        \item Satisfies every rule: whenever there exists a substitution \(\sigma\) such that all body atoms \(B_1\sigma, \dots, B_n\sigma\) are in \(M\), then \(\text{head}\sigma\) must also be in \(M\).
-    \end{enumerate}
-
-    There are generally \emph{many} models that satisfy these conditions. For example, one could arbitrarily add to \(M\) additional facts that do not belong to \(D\) (hence the first rule is enforced).
-    Such facts also respect the second rule since facts have no body. 
-
-    However, we are interested in the model that contains \emph{only} the facts that are forced to be true by \(D\) and \(P\), and nothing more. 
-    This model is called the \keyword{minimal model}, which has two interesting properties:
-    \begin{enumerate}
-        \item It is a subset of every other model (hence \q{least}).
-        \item It coincides exactly with the least fixed point \(T_{P,\infty}(D)\) computed by iterating the immediate consequence operator.
-    \end{enumerate}
-\end{note}
 
 Let's see immediate consequence \q{in action} in the following example.
 
@@ -202,8 +219,8 @@ Let's see immediate consequence \q{in action} in the following example.
 flight(lhr, gla, ba).
 flight(gla, jfk, ba).
 
-reachable(X,Y) :- flight(X,Y,Z).
-reachable(X,Y) :- flight(X,W,Z), reachable(W,Y).
+reachable(X,Y) :- flight(X,Y,_).
+reachable(X,Y) :- flight(X,W,_), reachable(W,Y).
     \end{lstlisting}
 
     We start from the initial situation 
@@ -220,3 +237,4 @@ reachable(X,Y) :- flight(X,W,Z), reachable(W,Y).
 
     The least fixed point contains exactly the direct and indirect reachability pairs.
 \end{example}
+
