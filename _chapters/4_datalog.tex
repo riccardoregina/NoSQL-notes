@@ -348,3 +348,119 @@ ans(X, Y) :- at_most_two_airlines(X, Y, _, _).
 
 We \emph{can} express all of these queries about paths since adding a new fact would not invalidate the already found paths.
 
+\section{\texorpdfstring{\protect\warningsymbol{}}{[!]} Extensions of Datalog}
+While monotonicity guarantees polynomial-time termination through a stable fixpoint, it severely limits the expressive power of the language. 
+Real-world queries often require non-monotonic reasoning, such as finding elements with zero relationships or calculating a maximum value. 
+
+To support these operations without losing the termination guarantee, modern engines introduce \keyword{stratification}~\cite{APT198889}.
+
+\subsection{The Paradox of Unrestricted Negation}
+If we simply introduce a negation operator s.t. results can be removed, we risk creating logical paradoxes that destroy the previously described inference model: Datalog computes results by repeatedly applying the immediate consequence operator until the fixpoint is reached. Consider a rule that depends on its own negation:
+
+\begin{lstlisting}[language=prolog, caption={The barber paradox.}]
+shaves(barber, X) :- not shaves(X, X).
+\end{lstlisting}
+
+To determine if the barber shaves himself (\texttt{X = barber}), the engine checks if \texttt{shaves(barber, barber)} is an existing fact.
+If it is not, the rule's body evaluates to true, and the engine derives \texttt{shaves(barber, barber)}. 
+In the next evaluation step, because \texttt{shaves(barber, barber)} is now present, the rule's body evaluates to false and so \texttt{shaves(barber, barber)} gets removed. 
+This deduction oscillates indefinitely and the program fails to reach a stable fixpoint, destroying the deterministic nature of the language.
+
+\subsection{The Core Concept: Stratification}
+To safely introduce non-monotonic operations, Datalog compilers perform a structural analysis of the program to build a \keyword{dependency graph}. 
+In this directed graph, each predicate is a node. The edges represent dependencies between predicates and are categorized into positive edges (direct dependence) and negative edges (dependence via negation or aggregation).
+
+More specifically, the compiler:
+\begin{enumerate}
+    \item Groups the predicates into mutually recursive sets --- the strongly connected components (SCCs) of the dependency graph. Each SCC is a \keyword{stratum}.
+    \item Calculates the compute schedule by performing a topological sort of the strata. Each stratum gets an index. The schedule must enforce two conditions:
+        \begin{enumerate}
+            \item If predicate A depends positively on predicate B, the stratum of A must be greater than or equal to the stratum of B.
+            \item If predicate A depends negatively (or via aggregation) on predicate B, the stratum of A must be \emph{strictly} greater than the stratum of B.
+        \end{enumerate}
+\end{enumerate}
+
+A program is \keyword{stratifiable} if and only if these rules can be satisfied. 
+If a negative dependency exists within the same SCC (a negative cycle), the strict inequality cannot be met, and the program is rejected. 
+
+During execution, the engine evaluates the lowest stratum to absolute completion. 
+Once finished, its results are treated as immutable, read-only facts for the next stratum. 
+By the time a negated predicate is evaluated, its truth value is completely fixed, entirely avoiding the oscillation problem.
+
+\subsection{Extension 1: Stratified Negation}
+
+With the execution model partitioned into strata, we can safely introduce the \keyword{stratified negation} operator. A critical requirement for safe negation is the rule safety that we have already mentioned together with its motivations.
+
+\begin{example}{}
+    Let's consider the following program and let's see how the compiler would determine its strata.
+    \begin{lstlisting}[language=prolog]
+city(X) :- flight(X, _, _).
+city(X) :- flight(_, X, _).
+
+reachable(X, Y) :- flight(X, Y, _).
+reachable(X, Y) :- reachable(X, Z), flight(Z, Y, _).
+
+unreachable(X, Y) :- city(X), city(Y), not reachable(X, Y).
+    \end{lstlisting}
+    The dependency graph is:
+    \begin{center}
+        \begin{tikzpicture}[
+            >={Stealth[length=3mm]},
+            pos_edge/.style={->, black, thick},
+            neg_edge/.style={->, red, thick, dashed}
+        ]
+            \node (flight) at (0, 0) {flight};
+            \node (city) at (-2, -1.5) {city};
+            \node (reachable) at (2, -1.5) {reachable};
+            \node (unreachable) at (0, -3) {unreachable};
+
+            \path[pos_edge] (flight) edge (city);
+            \path[pos_edge] (flight) edge (reachable);
+            \path[pos_edge] (reachable) edge[loop right] (reachable);
+            \path[pos_edge] (city) edge (unreachable);
+            \path[neg_edge] (reachable) edge (unreachable);
+        \end{tikzpicture}
+        \captionof{figure}{Black (red) arrows represent positive (negative) dependencies.}
+\end{center}
+    and the only mutually recursive set is \texttt{\{reachable\}} and so the SCCs are the predicates themselves.
+    Since there are no negative cycles, the program is valid.
+    Now, the compiler assigns an index to each SCC based on the mentioned rules:
+    \begin{enumerate}
+        \item Facts are assigned to stratum 0;
+        \item \texttt{city} depends positively on \texttt{flight}, so \texttt{stratum(city) >= stratum(flight)}.
+        \item \texttt{reachable} depends positively on \texttt{flight}, so \texttt{stratum(reachable) >= stratum(flight)};
+        \item \texttt{unreachable} depends positively on \texttt{city} and negatively on \texttt{reachable}, so \texttt{stratum(unreachable) > stratum(reachable)}.
+    \end{enumerate}
+    A valid topological sort is: \texttt{stratum(flight) = 1}, \texttt{stratum(city) = stratum(reachable) = 1}, \texttt{stratum(unreachable) = 2}.
+    During runtime, the engine executes the strata in order: all facts derived in the previous stratum are immutable.
+    At stratum 0, the DB contains all the extensional facts (\texttt{flight}).
+    At stratum 1, facts produced by predicates \texttt{city} and \texttt{reachable} are added.
+    At stratum 2, the engine derives all the \texttt{unreachable} facts by taking every combination of \texttt{city(X)} and \texttt{city(Y)} and simply checking if that pair does appear in a \texttt{reachable} fact.
+\end{example}
+
+\subsection{Extension 2: Stratified Aggregation}
+
+Aggregate functions like \texttt{COUNT}, \texttt{SUM}, and \texttt{MAX} suffer from the exact same logical clash with recursion as negation: they inherently violate monotonicity.
+
+During a fixpoint iteration, if an engine attempts to calculate a sum while a recursive rule is simultaneously adding new values to the target dataset, the aggregate value continuously shifts. The problem is that a rule might logically trigger in one iteration because a count equals a specific value. 
+In the next iteration, a recursive rule might add another fact, incresing the count, which invalidates the premise that previously fired the rule. 
+This creates the exact same non-deterministic oscillation seen in the barber paradox.
+
+Therefore, aggregates are treated identically to negation in the dependency graph. 
+The set of data being aggregated must be fully derived in a lower stratum before the aggregation function is applied in a strictly higher stratum.
+
+\begin{example}{Stratified Aggregation}
+    Consider the following program that, for each airport X, counts the reachable airports Y. 
+    \begin{lstlisting}[language=prolog]
+reachable(X, Y) :- flight(X, Y, _).
+reachable(X, Y) :- reachable(X, Z), flight(Z, Y, _).
+
+reachable_count(X, C) :- reachable(X, Y), C = COUNT(Y).
+    \end{lstlisting}
+    Here, \texttt{reachable\_count} depends negatively on \texttt{reachable} and so it must to be derived in a subsequent stratum. For example, stratum 0 adds the extensional facts, stratum 1 derives the \texttt{reachable} facts, stratum 2 counts over the read-only \texttt{reachable} facts.
+\end{example}
+
+\subsection{Beyond Stratification}
+While stratification solves most practical database queries, certain logical problems naturally contain negative cycles, such as defining alternating winning and losing states in a game. 
+To evaluate such unstratifiable programs, more advanced theoretical frameworks are required, namely \emph{Well-Founded Semantics} or \emph{Answer Set Programming} (ASP), which can assign an \emph{undefined} truth value to paradoxical statements.
+
