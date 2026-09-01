@@ -207,7 +207,7 @@ Starting from the EDB atoms of the database \(D\), repeated application of \(T_P
 \[
 T_{P,0}(D) = D, \quad T_{P, i+1}(D) = T_{P, i}(D) \cup T_P(T_{P, i}(D))
 \]
-Since Datalog rules are monotonic (adding facts only adds more derivable facts, never removes them), the starting database is finite and no datalog rules can create new constants (this is why functions are not allowed), this sequence converges after finitely many steps to a \keyword{least fixed point}, denoted \[T_{P,\infty}(D)=\bigcup_{i=0}^{\infty}T_{P,i}(D).\]
+Since Datalog rules are \keyword{monotonic} (adding facts only adds more derivable facts, never removes them), the starting database is finite and no datalog rules can create new constants (this is why functions are not allowed), this sequence converges after finitely many steps to a \keyword{least fixed point}, denoted \[T_{P,\infty}(D)=\bigcup_{i=0}^{\infty}T_{P,i}(D).\]
 
 This fixed point is exactly the set of all facts logically entailed by the program and the database: it is the \keyword{minimal model} of the program.
 
@@ -237,4 +237,114 @@ reachable(X,Y) :- flight(X,W,_), reachable(W,Y).
 
     The least fixed point contains exactly the direct and indirect reachability pairs.
 \end{example}
+
+\begin{example}{Performance Concerns}
+    Since reachability (and, in general, transitive closure of some relation) is by far the most common query, it is useful to consider some performance concerns.
+    Suppose we have to find all the reachable airports from the \code{lhr} airport.
+    We could first compute the transitive closure of the \code{flight} predicate and then select only the inferred \code{reachable} facts with \code{lhr} as the first constant:
+    \begin{lstlisting}[language=prolog]
+reachable(X, Y) :- flight(X, Y, _).
+reachable(X, Y) :- reachable(X, Z), flight(Z, Y, _).
+
+ans(Y) :- reachable(lhr, Y).
+    \end{lstlisting}
+    but, by doing this, we would compute the whole transitive closure only to select very few of its results.
+    Another, more efficient way of making this query is by binding the constant early:
+    \begin{lstlisting}[language=prolog]
+reachable_from_lhr(Y) :- flight(lhr, Y, _).
+reachable_from_lhr(Y) :- reachable_from_lhr(Z), flight(Z, Y, _).
+
+ans(Y) :- reachable_from_lhr(Y).
+    \end{lstlisting}
+\end{example}
+
+\section{Limitations and Capabilities of Datalog}
+Monotonicity is the golden property that guarantees termination in Datalog. However, it comes with some limitations.
+Suppose we have a database containing information about flights s.t. \code{flight(lhr, gla, ba)} means that there is a flight, operated by \code{ba}, from \code{lhr} to \code{gla}:
+\begin{lstlisting}[language=prolog]
+flight(lhr, gla, ba).
+flight(gla, jfk, ba).
+\end{lstlisting}
+Now, we want to define a predicate \code{at\_most\_one(X)} to find all the airports that have at most one departing flight. 
+Let's assume that this predicate exists so that the immediate consequence operator adds \code{at\_most\_one(lhr)} and \code{at\_most\_one(gla)} to the database.
+But, if a new fact is added (say \code{flight(lhr, lgw, ba)}) s.t. the database becomes
+\begin{lstlisting}[language=prolog]
+flight(lhr, gla, ba).
+flight(gla, jfk, ba).
+at_most_one(lhr).
+at_most_one(gla).
+flight(lhr, lgw, ba).
+\end{lstlisting}
+And so the previous result (\code{at\_most\_one(lhr)}) is now invalid, but the monotonicity property states that facts can only be added and so this predicate \emph{cannot} be expressed.
+Similarly, we \emph{cannot} express the predicate \code{no\_flights(X)}: adding a fact would invalidate the results. Moreover, this last predicate would be unsafe:
+\begin{lstlisting}[language=prolog]
+no_flights(X) :- not flight(X, _, _).
+\end{lstlisting}
+
+In contrast, we \emph{can} express the \code{at\_least\_one(X)} predicate: adding new facts will not invalidate the result.
+\begin{lstlisting}[language=prolog]
+at_least_one(X) :- flight(X, _, _).
+\end{lstlisting}
+
+Finally, we \emph{cannot} express the \code{exactly\_one(X)} predicate that would be defined as
+\begin{lstlisting}[language=prolog]
+exactly_one(X) :- at_least_one(X), at_most_one(X).
+\end{lstlisting}
+but we cannot express \code{at\_most\_one(X)}.
+
+Another Datalog limitation is that it \emph{cannot} track the nodes of a path, it only creates new facts.
+For example, we cannot express a query like \q{find the couples of airports X, Y s.t. one can travel from X to Y without touching the same airport twice}.
+
+These limitations should not hide how many queries can actually be expressed with Datalog: we \emph{can} make basically every other query that does not require involve the previous, illegal ones.
+For example, we \emph{can} express the query \q{find the couples of airports X, Y s.t. one can reach Y from X with flights covered by exactly two airlines}:
+\begin{lstlisting}[language=prolog]
+% The idea is to make a path "one_airline" as long as it is covered by only one airline (we save the name of the airline in the newly generated fact to simulate a memory) and then make it "two_airlines" as soon as we extend it with a flight of a different airline (which will be saved together with the other airline). Once a path is "two_airlines", it can be extended with whatever flight of one of the two companies.
+one_airline(X, Y, C) :- flight(X, Y, C). % Base case
+one_airline(X, Y, C) :- one_airline(X, Z, C), flight(Z, Y, C). % Recursive case
+
+two_airlines(X, Y, C1, C2) :- one_airline(X, Z, C1), flight(Z, Y, C2), C1 != C2. % The moment when the path becomes "two_airlines"
+
+two_airlines(X, Y, C1, C2) :- two_airlines(X, Z, C1, C2), flight(Z, Y, C1).
+two_airlines(X, Y, C1, C2) :- two_airlines(X, Z, C1, C2), flight(Z, Y, C2). % Both airlines are allowed!
+
+ans(X, Y) :- two_airlines(X, Y, _, _).
+\end{lstlisting}
+
+\begin{note}{}
+    Two variables \code{A} and \code{B} (so with different names) \emph{can} be bound to the same constant. By writing two variables with distinct names, we are essentially telling Datalog that those two variables are allowed to be bound to different constants.
+    To impose different bindings, one should add the condition \code{A != B} to the rule body.
+\end{note}
+
+or \q{find the couples of airports X, Y s.t. one can reach Y from X with paths of an even number of flights s.t. all the flights are operated by the same airline or the flights are operated by two different airlines s.t. the odd flights are operated by one airline and even ones by the other airline}:
+\begin{lstlisting}[language=prolog]
+% The idea is to consider a path of length two as the base case. In this way, by concatenating paths of length two, we will obtain only even paths "by design"
+even_one_airline(X, Y, C) :- flight(X, Z, C), flight(Z, Y, C).
+even_one_airline(X, Y, C) :- even_one_airline(X, Z, C), even_one_airline(Z, Y, C).
+
+even_two_airlines(X, Y, C1, C2) :- flight(X, Z, C1), flight(Z, Y, C2), C1 != C2.
+even_two_airlines(X, Y, C1, C2) :- even_two_airlines(X, Z, C1, C2), even_two_airlines(Z, Y, C1, C2).
+
+ans(X, Y) :- even_one_airline(X, Y, _).
+ans(X, Y) :- even_two_airlines(X, Y, _, _).
+\end{lstlisting}
+
+\begin{note}{}
+    When several \code{ans} are specified, their results are gathered.
+\end{note}
+
+or \q{find the couples of airports X, Y s.t. one can reach Y from X with flights operated by two companies at most}:
+\begin{lstlisting}[language=prolog]
+% The idea is again to save the airlines inside the newly generated facts:
+% at_most_two_airlines(X, Y, C1, C2) :- flight(X, Y, C1).
+% Wait! The previous rule is unsafe: we need a gimmick to make it safe: we add the airline predicate
+airline(X) :- flight(_, _, X).
+
+at_most_two_airlines(X, Y, C1, C2) :- flight(X, Y, C1), airline(C2). % C1 and C2 are allowed to be the same
+at_most_two_airlines(X, Y, C1, C2) :- at_most_two_airlines(X, Z, C1, C2), flight(Z, Y, C1).
+at_most_two_airlines(X, Y, C1, C2) :- at_most_two_airlines(X, Z, C1, C2), flight(Z, Y, C2). % Both airlines are allowed!
+
+ans(X, Y) :- at_most_two_airlines(X, Y, _, _).
+\end{lstlisting}
+
+We \emph{can} express all of these queries about paths since adding a new fact would not invalidate the already found paths.
 
