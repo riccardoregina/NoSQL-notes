@@ -129,9 +129,6 @@ Differently from relational databases, the One-to-Many relationship is more nuan
     \item \textbf{One-to-Few Relationships:} The \q{one} is treated as the primary element, and the \q{many} side entities are \keyword{embedded} as an array within the primary document. For example, a \code{customer} document may embed an array of \code{addresses}. This allows retrieving the customer and all their addresses with a single read. However, one should ponderate the embedding choice based on whether the embedded element should have a separate document. This choice is typically driven by the most frequent queries on the system.
     \item \textbf{One-to-Many Relationships:} Each element of the \q{many} side gets referenced in a list inside the \q{one} side. Each element of the \q{many} side has now its own document. 
         For example, a \code{Product} may embed an array of \code{ReplacementPart} identifiers. In this way, to retrieve additional information about the the replacement parts of a product, more than just one queries will be needed. 
-        \begin{note}{}
-            If we add a reference identifier of the product to the replacement part document, then this approach can also model Many-to-Many relationships.
-        \end{note}
     \item \textbf{One-to-Squillions Relationships:} The \q{one} is related to so many \q{many} that the document is very likely to overflow the document size limit (16MB in MongoDB). So, we create a separate collection to contain the \q{many} documents, each of which will reference the \q{one}.
         For example, in a log-tracking system, a \code{host} produces thousands of \code{log}s per day. We create a collection for the \code{host}s and another one for the \code{log}s, where each \code{log} references its \code{host}.
     \item \textbf{Many-to-Many Relationships:} Two collections are used, and each collection contains \keyword{references} to instances of the other entity (Two-Way referencing). This minimizes data duplication, but referential integrity is not automatically guaranteed by the database --- it must be enforced at the application level. For example, \code{students} and \code{courses} collections each contain arrays of references to the other collection.
@@ -690,15 +687,13 @@ Variables declared within a quantified path pattern are \keyword{group variables
     We want to find a path from Piazza Amedeo to Piazza del Plebiscito such that there is less than a km between a place and another, so that we can stop at some bar for a fresh drink of water. We want to know the intermediate stops, of course.
     We can elegantly express this with the following Cypher query:
     \begin{lstlisting}
-    MATCH (x {name: 'Piazza Amedeo'}),
-          (x) (()-[r:NEXT]->(s) WHERE r.distance <= 1) (y),
-          (y {name: 'Piazza del Plebiscito'})
-    UNWIND s AS stop
-    RETURN stop.name
+MATCH (x {name: 'Piazza Amedeo'}),
+      (x) (()-[r:NEXT]->(s) WHERE r.distance <= 1) (y),
+      (y {name: 'Piazza del Plebiscito'})
+UNWIND s AS stop
+RETURN stop.name
     \end{lstlisting}
     where we have used the \texttt{UNWIND} operator to transform each element of the \code{s} list in a row named \texttt{stop}.
-    We will talk about it.
-
     The output of the query is:
     \begin{lstlisting}
         stop

@@ -80,7 +80,7 @@ If the given string is not a valid lexical value for its declared datatype, the 
 \subsubsection{Language-specific Strings}
 One can specify a language-tagged string by appending a language tag:
 \begin{center}
-    \code{"lexical form"\textasciicircum\textasciicircum language-tag}
+    \code{"lexical form"@language-tag}
 \end{center}
 For example, \texttt{"cat"@en}, \texttt{"chat"@fr}, \texttt{"Katze"@de}. 
 This special case of literal is widely used to encode human-readable labels in multiple languages.
@@ -323,7 +323,7 @@ Moreover, one can combine multiple BGPs in the same \code{WHERE} clause by juxta
 
 \begin{definition}{Group Graph Pattern}
     A group graph pattern (GGP) is an arbitrarily complex pattern inside a pair of curly braces \code{\{...\}}.
-    It is \emph{arbitrarily} complex because it can contain just triple patterns --- in this case, it becomes a BGP --- as well as entire subqueries (\texttt{SELECT}-\texttt{WHERE}-...) and nested GPPs.
+    It is \emph{arbitrarily} complex because it can contain just triple patterns --- in this case, it becomes a BGP --- as well as entire subqueries (\texttt{SELECT}-\texttt{WHERE}-...) and nested GGPs.
 \end{definition}
 
 So, GGPs are more general patterns and a BGP is a trivial GGP.
